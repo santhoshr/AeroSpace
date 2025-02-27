@@ -9,7 +9,91 @@ public class TrayMenuModel: ObservableObject {
     @Published var trayText: String = ""
     /// Is "layouting" enabled
     @Published var isEnabled: Bool = true
+    /// Is border visualization enabled
+    @Published var isBorderEnabled: Bool = true
     @Published var workspaces: [WorkspaceViewModel] = []
+    
+    /// Toggle border visualization on/off
+    func toggleBorderVisibility() {
+        isBorderEnabled.toggle()
+        BorderIntegrationManager.shared.setEnabled(isBorderEnabled)
+        
+        // If borders are enabled and there's a focused window, update its border
+        if isBorderEnabled {
+            // If we have splits, show appropriate borders
+            if let focusedWindow = focus.windowOrNil, 
+               let topLeft = focusedWindow.getTopLeftCorner(),
+               let size = focusedWindow.getSize() {
+                // Get all sibling windows/splits
+                var inactiveFrames: [NSRect] = []
+                if let parent = focusedWindow.parent as? TilingContainer {
+                    for child in parent.children {
+                        if child != focusedWindow, let childWindow = child as? Window, 
+                           let childTopLeft = childWindow.getTopLeftCorner(), 
+                           let childSize = childWindow.getSize() {
+                            inactiveFrames.append(NSRect(
+                                x: childTopLeft.x,
+                                y: childTopLeft.y,
+                                width: childSize.width,
+                                height: childSize.height
+                            ))
+                        } else if child != focusedWindow, let childSplit = child as? EmptySplit, 
+                                  let childFrame = childSplit.getFrameForRendering() {
+                            inactiveFrames.append(NSRect(
+                                x: childFrame.topLeftX,
+                                y: childFrame.topLeftY,
+                                width: childFrame.width,
+                                height: childFrame.height
+                            ))
+                        }
+                    }
+                    
+                    if !inactiveFrames.isEmpty {
+                        let focusedFrame = NSRect(
+                            x: topLeft.x,
+                            y: topLeft.y,
+                            width: size.width,
+                            height: size.height
+                        )
+                        BorderIntegrationManager.shared.onFocusChanged(Notification(
+                            name: NSNotification.Name("AeroSpaceFocusChanged"),
+                            object: nil,
+                            userInfo: [
+                                "focusedWindowFrame": focusedFrame,
+                                "inactiveWindowFrames": inactiveFrames
+                            ]
+                        ))
+                    } else {
+                        // No splits yet, show fullscreen border
+                        BorderIntegrationManager.shared.showFullscreenBorder()
+                    }
+                } else {
+                    // No splits yet, show fullscreen border
+                    BorderIntegrationManager.shared.showFullscreenBorder()
+                }
+            } else if let emptySplit = focus.emptySplitOrNil, 
+                      let frame = emptySplit.getFrameForRendering() {
+                // Show border for empty split focus
+                let focusedFrame = NSRect(
+                    x: frame.topLeftX,
+                    y: frame.topLeftY,
+                    width: frame.width,
+                    height: frame.height
+                )
+                BorderIntegrationManager.shared.onFocusChanged(Notification(
+                    name: NSNotification.Name("AeroSpaceFocusChanged"),
+                    object: nil,
+                    userInfo: [
+                        "focusedWindowFrame": focusedFrame,
+                        "inactiveWindowFrames": []
+                    ]
+                ))
+            } else {
+                // No window or split focus yet, show fullscreen border
+                BorderIntegrationManager.shared.showFullscreenBorder()
+            }
+        }
+    }
 }
 
 func updateTrayText() {

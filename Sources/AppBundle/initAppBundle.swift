@@ -31,6 +31,9 @@ public func initAppBundle() {
             _ = config.afterLoginCommand.runCmdSeq(.defaultEnv, .emptyStdin)
         }
         _ = config.afterStartupCommand.runCmdSeq(.defaultEnv, .emptyStdin)
+        
+        // Initialize the border system after startup is complete
+        StartupManager.shared.initBorderSystem()
     }
 }
 

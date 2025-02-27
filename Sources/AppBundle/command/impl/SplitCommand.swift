@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import Common
 
 struct SplitCommand: Command {
@@ -47,22 +48,25 @@ struct SplitCommand: Command {
                     )
                     window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
                 }
+                
+                // After successful split, send notification with frame information
+                sendSplitNotification(window: window)
+                
                 return true
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
                 return io.err("Can't split macos fullscreen, minimized windows and windows of hidden apps. This behavior may change in the future")
             case .macosPopupWindowsContainer:
-                return false // Impossible
+                return io.err("Can't split macos popup windows")
         }
     }
     
-    /// Create an empty split in the workspace or within an existing split
+    /// Create empty split in place of the current focus
     private func createEmptySplit(_ target: LiveFocus, _ io: CmdIo) -> Bool {
-        // If there's already a window focused, split it
         if let window = target.windowOrNil {
+            // Create an empty split based on the current window's layout
             switch window.parent.cases {
                 case .workspace:
-                    // Nothing to do for floating and macOS native fullscreen windows
-                    return io.err("Can't split floating windows")
+                    return io.err("Can't split floating windows with empty splits")
                 case .tilingContainer(let parent):
                     let orientation: Orientation = switch args.arg.val {
                         case .vertical: .v
@@ -71,8 +75,12 @@ struct SplitCommand: Command {
                     }
                     if parent.children.count == 1 {
                         parent.changeOrientation(orientation)
-                        // Add an empty split next to the window
-                        parent.createEmptySplit()
+                        
+                        // Create empty split in the same parent
+                        let emptySplit = parent.createEmptySplit()
+                        
+                        // Send notification about the split
+                        sendSplitNotification(window: window, emptySplit: emptySplit)
                     } else {
                         let data = window.unbindFromParent()
                         let newParent = TilingContainer(
@@ -85,7 +93,10 @@ struct SplitCommand: Command {
                         window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
                         
                         // Create an empty split alongside the window
-                        newParent.createEmptySplit()
+                        let emptySplit = newParent.createEmptySplit()
+                        
+                        // Send notification about the split
+                        sendSplitNotification(window: window, emptySplit: emptySplit)
                     }
                     return true
                 case .macosMinimizedWindowsContainer:
@@ -114,15 +125,24 @@ struct SplitCommand: Command {
                 rootContainer.changeOrientation(orientation)
             } else if rootContainer.children.isEmpty {
                 // Create the first empty split
-                workspace.createEmptySplit()
+                let emptySplit = workspace.createEmptySplit()
+                
+                // Send notification for the first empty split
+                sendEmptySplitNotification(emptySplit: emptySplit)
             } else {
                 // Create additional splits with correct orientation
                 if rootContainer.orientation != orientation {
                     // Create a container with correct orientation
-                    rootContainer.createContainerWithEmptySplit(orientation: orientation)
+                    let emptySplit = rootContainer.createContainerWithEmptySplit(orientation: orientation)
+                    
+                    // Send notification for the new empty split
+                    sendEmptySplitNotification(emptySplit: emptySplit)
                 } else {
                     // Just add an empty split
-                    rootContainer.createEmptySplit()
+                    let emptySplit = rootContainer.createEmptySplit()
+                    
+                    // Send notification for the new empty split
+                    sendEmptySplitNotification(emptySplit: emptySplit)
                 }
             }
             
@@ -155,7 +175,10 @@ struct SplitCommand: Command {
                     emptySplit.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
                     
                     // Create another empty split in the same container
-                    newParent.createEmptySplit()
+                    let newEmptySplit = newParent.createEmptySplit()
+                    
+                    // Send notification about the split
+                    sendSplitNotificationForEmptySplits(emptySplit1: emptySplit, emptySplit2: newEmptySplit)
                 }
                 return true
             case .macosMinimizedWindowsContainer:
@@ -167,5 +190,117 @@ struct SplitCommand: Command {
             case .macosHiddenAppsWindowsContainer:
                 return io.err("Can't split hidden app empty splits")
         }
+    }
+    
+    /// Send notification about window split with frames
+    private func sendSplitNotification(window: Window, emptySplit: EmptySplit? = nil) {
+        // Get window frame using topLeft and size
+        guard let topLeft = window.getTopLeftCorner(), 
+              let size = window.getSize() else { return }
+        
+        // Convert to NSRect
+        let activeFrame = NSRect(
+            x: topLeft.x,
+            y: topLeft.y,
+            width: size.width,
+            height: size.height
+        )
+        
+        var inactiveFrames: [NSRect] = []
+        
+        // If we have an empty split, add it to inactive frames
+        if let emptySplit = emptySplit, let splitFrame = emptySplit.getFrameForRendering() {
+            inactiveFrames.append(NSRect(
+                x: splitFrame.topLeftX,
+                y: splitFrame.topLeftY,
+                width: splitFrame.width,
+                height: splitFrame.height
+            ))
+        } else {
+            // Otherwise gather all sibling windows
+            if let parent = window.parent as? TilingContainer {
+                for child in parent.children {
+                    if child != window, let childWindow = child as? Window, 
+                       let childTopLeft = childWindow.getTopLeftCorner(), 
+                       let childSize = childWindow.getSize() {
+                        inactiveFrames.append(NSRect(
+                            x: childTopLeft.x,
+                            y: childTopLeft.y,
+                            width: childSize.width,
+                            height: childSize.height
+                        ))
+                    } else if child != window, let childSplit = child as? EmptySplit, let frame = childSplit.getFrameForRendering() {
+                        inactiveFrames.append(NSRect(
+                            x: frame.topLeftX,
+                            y: frame.topLeftY,
+                            width: frame.width,
+                            height: frame.height
+                        ))
+                    }
+                }
+            }
+        }
+        
+        // Post the notification
+        NotificationCenter.default.post(
+            name: NSNotification.Name("AeroSpaceWindowSplit"),
+            object: nil,
+            userInfo: [
+                "activeFrame": activeFrame,
+                "inactiveFrames": inactiveFrames
+            ]
+        )
+    }
+    
+    /// Send notification for empty split creation
+    private func sendEmptySplitNotification(emptySplit: EmptySplit) {
+        guard let frame = emptySplit.getFrameForRendering() else { return }
+        
+        let activeFrame = NSRect(
+            x: frame.topLeftX,
+            y: frame.topLeftY,
+            width: frame.width,
+            height: frame.height
+        )
+        
+        // Post the notification
+        NotificationCenter.default.post(
+            name: NSNotification.Name("AeroSpaceWindowSplit"),
+            object: nil,
+            userInfo: [
+                "activeFrame": activeFrame,
+                "inactiveFrames": [] as [NSRect]
+            ]
+        )
+    }
+    
+    /// Send notification for split between two empty splits
+    private func sendSplitNotificationForEmptySplits(emptySplit1: EmptySplit, emptySplit2: EmptySplit) {
+        guard let frame1 = emptySplit1.getFrameForRendering() else { return }
+        guard let frame2 = emptySplit2.getFrameForRendering() else { return }
+        
+        let activeFrame = NSRect(
+            x: frame1.topLeftX,
+            y: frame1.topLeftY,
+            width: frame1.width,
+            height: frame1.height
+        )
+        
+        let inactiveFrame = NSRect(
+            x: frame2.topLeftX,
+            y: frame2.topLeftY,
+            width: frame2.width,
+            height: frame2.height
+        )
+        
+        // Post the notification
+        NotificationCenter.default.post(
+            name: NSNotification.Name("AeroSpaceWindowSplit"),
+            object: nil,
+            userInfo: [
+                "activeFrame": activeFrame,
+                "inactiveFrames": [inactiveFrame]
+            ]
+        )
     }
 }
