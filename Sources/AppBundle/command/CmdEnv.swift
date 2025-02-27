@@ -19,6 +19,7 @@ struct CmdEnv: Copyable { // todo forward env from cli to server
     func withFocus(_ focus: LiveFocus) -> CmdEnv {
         switch focus.asLeaf {
             case .window(let wd): .defaultEnv.copy(\.windowId, wd.windowId)
+            case .emptySplit(let es): .defaultEnv.copy(\.workspaceName, es.mostRecentWorkspaceParent.name)
             case .emptyWorkspace(let ws): .defaultEnv.copy(\.workspaceName, ws.name)
         }
     }

@@ -376,6 +376,40 @@ private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Wo
 
 // The function is private because it's "unsafe". It requires the window to be in unbound state
 private func getBindingDataForNewTilingWindow(_ workspace: Workspace) -> BindingData {
+    // First, check if there's a focused empty split in the workspace
+    if let focusedEmptySplit = focus.emptySplitOrNil, 
+       focusedEmptySplit.mostRecentWorkspaceParent == workspace {
+        // Get the parent of the empty split
+        let parent = focusedEmptySplit.parent
+        let ownIndex = focusedEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        focusedEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no focused empty split, check if there are any empty splits in the workspace
+    if let firstEmptySplit = workspace.firstEmptySplitRecursive {
+        // Get the parent of the empty split
+        let parent = firstEmptySplit.parent
+        let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        firstEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no empty splits exist, fall back to standard behavior
     let mruWindow = workspace.mostRecentWindowRecursive
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
         return BindingData(

@@ -113,6 +113,36 @@ class TreeNode: Equatable {
         return iterator.next() ?? children.last
     }
 
+    /// Recursively find the most recent empty split
+    var mostRecentEmptySplitRecursive: EmptySplit? {
+        // Iterate through MRU children and find the first empty split
+        for child in _mruChildren {
+            if let emptySplit = child as? EmptySplit {
+                return emptySplit
+            }
+            if let childEmptySplit = child.mostRecentEmptySplitRecursive {
+                return childEmptySplit
+            }
+        }
+        return nil
+    }
+    
+    /// Find a focus target (window or empty split) when coming from the given direction
+    func findFocusTargetRecursive(snappedTo side: CardinalDirection) -> TreeNode? {
+        if let window = self as? Window {
+            return window
+        }
+        
+        if let emptySplit = self as? EmptySplit {
+            return emptySplit
+        }
+        
+        switch side {
+            case .up, .down, .left, .right:
+                return mostRecentChild?.findFocusTargetRecursive(snappedTo: side)
+        }
+    }
+
     @discardableResult
     func unbindFromParent() -> BindingData {
         unbindIfBound() ?? errorT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace ?? "nil")")
