@@ -216,21 +216,37 @@ private func onFocusedMonitorChanged(_ focus: LiveFocus) {
 }
 
 private func updateFocusBorder(oldFocus: LiveFocus, newFocus: LiveFocus) {
-    if let window = newFocus.windowOrNil {
-        if let topLeft = window.getTopLeftCorner(), 
-           let size = window.getSize() {
-            let focusedFrame = NSRect(x: topLeft.x, y: topLeft.y, 
-                                    width: size.width, height: size.height)
-            FocusedWindowBorder.shared.showBorder(frame: focusedFrame)
-        }
-    } else if let emptySplit = newFocus.emptySplitOrNil, 
+    // Get workspace frame
+    let workspaceFrame = newFocus.workspace.workspaceMonitor.visibleRect.nsRect
+    
+    // Get active window/split frame
+    var activeFrame: NSRect? = nil
+    if let window = newFocus.windowOrNil,
+       let topLeft = window.getTopLeftCorner(),
+       let size = window.getSize() {
+        activeFrame = NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height)
+    } else if let emptySplit = newFocus.emptySplitOrNil,
               let rect = emptySplit.getFrameForRendering() {
-        let focusedFrame = NSRect(x: rect.topLeftX, y: rect.topLeftY, 
-                                width: rect.width, height: rect.height)
-        FocusedWindowBorder.shared.showBorder(frame: focusedFrame)
-    } else {
-        FocusedWindowBorder.shared.hideBorder()
+        activeFrame = rect.nsRect
     }
+    
+    // Get inactive window frames - Remove optional binding since workspace is non-optional
+    var inactiveFrames: [NSRect] = []
+    let workspace = newFocus.workspace
+    inactiveFrames = workspace.rootTilingContainer.allLeafWindowsRecursive
+        .filter { $0 != newFocus.windowOrNil }
+        .compactMap { window in
+            guard let topLeft = window.getTopLeftCorner(),
+                  let size = window.getSize() else { return nil }
+            return NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height)
+        }
+    
+    // Update all borders
+    FocusedWindowBorder.shared.updateBorders(
+        workspace: workspaceFrame,
+        active: activeFrame,
+        inactive: inactiveFrames
+    )
 }
 
 private func onFocusChanged(_ focus: LiveFocus) {

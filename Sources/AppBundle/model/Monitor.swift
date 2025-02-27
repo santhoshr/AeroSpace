@@ -24,6 +24,12 @@ protocol Monitor: AeroAny {
     var height: CGFloat { get }
 }
 
+extension Monitor {
+    var visibleFrame: NSRect {
+        return visibleRect.nsRect
+    }
+}
+
 class LazyMonitor: Monitor {
     private let screen: NSScreen
     let monitorAppKitNsScreenScreensId: Int

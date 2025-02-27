@@ -39,7 +39,7 @@ struct EnableCommand: Command, Equatable {
                 workspace.allLeafWindowsRecursive.forEach { ($0 as! MacWindow).unhideFromCorner() } // todo as!
                 workspace.layoutWorkspace() // Unhide tiling windows from corner
             }
-            focusedWindowBorder.hideBorder()
+            focusedWindowBorder.hideAll() // Use hideAll instead of hideBorder
         }
     return true
 }
