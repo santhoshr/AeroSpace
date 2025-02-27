@@ -34,7 +34,6 @@ func refreshSession<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked:
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
 
-        updateTrayText()
         normalizeLayoutReason(startup: startup)
         layoutWorkspaces()
     }

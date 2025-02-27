@@ -104,7 +104,7 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if let oldEmptySplit = oldFocus.emptySplitOrNil, 
        let visual = emptySplitVisuals[oldEmptySplit.id] {
         visual.hideBorder()
-        BorderOverlayManager.shared.hideActiveSplitBorder() // Changed from BorderIntegrationManager to BorderOverlayManager
+        // hideActiveSplitBorder
     }
 
     _focus = newFocus.frozen
@@ -117,9 +117,6 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if let newEmptySplit = newFocus.emptySplitOrNil,
        let visual = emptySplitVisuals[newEmptySplit.id] {
         visual.showBorder()
-        if let frame = newEmptySplit.getFrameForRendering()?.nsRect {
-            BorderOverlayManager.shared.showActiveSplitBorder(frame: frame)
-        }
     }
     
     // Send notification after focus has changed

@@ -22,12 +22,6 @@ public func menuBar(viewModel: TrayMenuModel) -> some Scene { // todo should it 
                 }
             }
             Divider()
-            
-            // Add Border Visualization toggle
-            Button(viewModel.isBorderEnabled ? "Hide Borders" : "Show Borders") {
-                viewModel.toggleBorderVisibility()
-            }.keyboardShortcut("B", modifiers: .command)
-            Divider()
         }
         Button(viewModel.isEnabled ? "Disable" : "Enable") {
             refreshSession(.menuBarButton, screenIsDefinitelyUnlocked: true) {
