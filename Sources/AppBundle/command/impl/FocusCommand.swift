@@ -173,15 +173,17 @@ private extension TreeNode {
             case .window(let window):
                 return window
             case .tilingContainer(let container):
-                if direction.orientation == container.orientation {
-                    return (direction.isPositive ? container.children.last : container.children.first)?
-                        .findFocusWindowRecursive(snappedTo: direction)
-                } else {
-                    return mostRecentChild?.findFocusWindowRecursive(snappedTo: direction)
-                }
-            case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
-                 .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
-                error("Impossible")
+                return container.mostRecentChild?.findFocusWindowRecursive(snappedTo: direction)
+            case .macosMinimizedWindowsContainer:
+                return nil
+            case .macosHiddenAppsWindowsContainer:
+                return nil
+            case .macosFullscreenWindowsContainer:
+                return nil
+            case .macosPopupWindowsContainer:
+                return nil
+            case .emptySplit:
+                return nil // Empty splits are not windows
         }
     }
 }

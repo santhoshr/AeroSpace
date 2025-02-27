@@ -91,6 +91,7 @@ extension CGPoint {
         return switch target.tilingTreeNodeCasesOrThrow() {
             case .window(let window): window
             case .tilingContainer(let container): findIn(tree: container, virtual: virtual)
+            case .emptySplit: nil // Empty splits can't be moved
         }
     }
 }

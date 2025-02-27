@@ -17,12 +17,10 @@ struct FrozenContainer {
             switch $0.nodeCases {
                 case .window(let w): .window(FrozenWindow(w))
                 case .tilingContainer(let c): .container(FrozenContainer(c))
-                case .workspace,
-                     .macosMinimizedWindowsContainer,
-                     .macosHiddenAppsWindowsContainer,
-                     .macosFullscreenWindowsContainer,
-                     .macosPopupWindowsContainer:
-                    illegalChildParentRelation(child: $0, parent: container)
+                case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
+                     .macosHiddenAppsWindowsContainer, .macosPopupWindowsContainer,
+                     .workspace, .emptySplit:
+                    error("Unexpected node type")
             }
         }
         layout = container.layout

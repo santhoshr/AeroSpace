@@ -46,11 +46,6 @@ struct SplitCommand: Command {
                         index: data.index
                     )
                     window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
-                    
-                    // If --empty flag is set, create an empty split alongside the window
-                    if args.createEmpty {
-                        newParent.createEmptySplit()
-                    }
                 }
                 return true
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
@@ -63,9 +58,45 @@ struct SplitCommand: Command {
     /// Create an empty split in the workspace or within an existing split
     private func createEmptySplit(_ target: LiveFocus, _ io: CmdIo) -> Bool {
         // If there's already a window focused, split it
-        if target.windowOrNil != nil {
-            // The window case is handled in the main run method
-            return false
+        if let window = target.windowOrNil {
+            switch window.parent.cases {
+                case .workspace:
+                    // Nothing to do for floating and macOS native fullscreen windows
+                    return io.err("Can't split floating windows")
+                case .tilingContainer(let parent):
+                    let orientation: Orientation = switch args.arg.val {
+                        case .vertical: .v
+                        case .horizontal: .h
+                        case .opposite: parent.orientation.opposite
+                    }
+                    if parent.children.count == 1 {
+                        parent.changeOrientation(orientation)
+                        // Add an empty split next to the window
+                        parent.createEmptySplit()
+                    } else {
+                        let data = window.unbindFromParent()
+                        let newParent = TilingContainer(
+                            parent: parent,
+                            adaptiveWeight: data.adaptiveWeight,
+                            orientation,
+                            .tiles,
+                            index: data.index
+                        )
+                        window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                        
+                        // Create an empty split alongside the window
+                        newParent.createEmptySplit()
+                    }
+                    return true
+                case .macosMinimizedWindowsContainer:
+                    return io.err("Can't split minimized windows")
+                case .macosFullscreenWindowsContainer:
+                    return io.err("Can't split fullscreen windows")
+                case .macosPopupWindowsContainer:
+                    return io.err("Can't split popup windows")
+                case .macosHiddenAppsWindowsContainer:
+                    return io.err("Can't split hidden app windows")
+            }
         } else {
             // If workspace is empty, create an empty split in the root container
             let orientation: Orientation = switch args.arg.val {
@@ -127,10 +158,14 @@ struct SplitCommand: Command {
                     newParent.createEmptySplit()
                 }
                 return true
-            case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
-                return io.err("Can't split macOS fullscreen, minimized empty splits. This behavior may change in the future")
+            case .macosMinimizedWindowsContainer:
+                return io.err("Can't split minimized empty splits")
+            case .macosFullscreenWindowsContainer:
+                return io.err("Can't split fullscreen empty splits")
             case .macosPopupWindowsContainer:
-                return false // Impossible
+                return io.err("Can't split popup empty splits")
+            case .macosHiddenAppsWindowsContainer:
+                return io.err("Can't split hidden app empty splits")
         }
     }
 }

@@ -48,6 +48,10 @@ private extension TreeNode {
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
                 return // Nothing to do for weirdos
+            case .emptySplit(_):
+                // Layout the empty split
+                lastAppliedLayoutPhysicalRect = physicalRect
+                lastAppliedLayoutVirtualRect = virtual
         }
     }
 }
