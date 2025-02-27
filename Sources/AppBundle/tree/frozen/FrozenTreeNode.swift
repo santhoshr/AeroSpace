@@ -4,6 +4,7 @@ import Common
 enum FrozenTreeNode {
     case container(FrozenContainer)
     case window(FrozenWindow)
+    case emptySplit(FrozenEmptySplit)
 }
 
 struct FrozenContainer {
@@ -17,9 +18,10 @@ struct FrozenContainer {
             switch $0.nodeCases {
                 case .window(let w): .window(FrozenWindow(w))
                 case .tilingContainer(let c): .container(FrozenContainer(c))
+                case .emptySplit(let e): .emptySplit(FrozenEmptySplit(e))
                 case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                      .macosHiddenAppsWindowsContainer, .macosPopupWindowsContainer,
-                     .workspace, .emptySplit:
+                     .workspace:
                     error("Unexpected node type")
             }
         }
@@ -36,6 +38,16 @@ struct FrozenWindow {
     init(_ window: Window) {
         id = window.windowId
         weight = getWeightOrNil(window) ?? 1
+    }
+}
+
+struct FrozenEmptySplit {
+    let uuid: UUID
+    let weight: CGFloat
+    
+    init(_ emptySplit: EmptySplit) {
+        self.uuid = emptySplit.id
+        self.weight = getWeightOrNil(emptySplit) ?? 1
     }
 }
 

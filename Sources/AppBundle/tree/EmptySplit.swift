@@ -44,6 +44,19 @@ class EmptySplit: TreeNode {
         return LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent)
     }
     
+    /// Update the visual representation of this empty split
+    func updateVisual() {
+        // Get the visual for this empty split
+        let visual = emptySplitVisuals[id] ?? {
+            let newVisual = EmptySplitVisual(emptySplit: self)
+            emptySplitVisuals[id] = newVisual
+            return newVisual
+        }()
+        
+        // Show the border
+        visual.showBorder()
+    }
+    
     /// Get the containing workspace
     var mostRecentWorkspaceParent: Workspace {
         let fullParentChain = parentsWithSelf

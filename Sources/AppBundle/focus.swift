@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import Common
 
 enum EffectiveLeaf {
@@ -43,6 +44,10 @@ struct LiveFocus: AeroAny, Equatable {
     /// Returns whether there is an actual leaf node (window or empty split) focused
     var hasLeafFocus: Bool {
         return windowOrNil != nil || emptySplitOrNil != nil
+    }
+    
+    func updateEmptySplitVisual() {
+        emptySplitOrNil?.updateVisual()
     }
 }
 
@@ -94,11 +99,18 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if oldFocus.workspace != newFocus.workspace {
         oldFocus.windowOrNil?.markAsMostRecentChild()
     }
+    
+    // Hide old empty split borders
+    if let oldEmptySplit = oldFocus.emptySplitOrNil, 
+       let visual = emptySplitVisuals[oldEmptySplit.id] {
+        visual.hideBorder()
+    }
 
     _focus = newFocus.frozen
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
     newFocus.windowOrNil?.markAsMostRecentChild()
+    newFocus.updateEmptySplitVisual()
     return status
 }
 extension Window {
