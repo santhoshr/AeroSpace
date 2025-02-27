@@ -34,8 +34,69 @@ class EmptySplitVisual {
         
         print("DEBUG: Showing border for split \(emptySplit.id) at \(frame.topLeftX), \(frame.topLeftY), \(frame.width)x\(frame.height)")
         
-        // Add simple highlight in parent view
-        if let window = NSApp.keyWindow {
+        // Try multiple approaches to find a window to add our border view to
+        var targetWindow: NSWindow?
+        
+        // First try: Use the key window
+        if let keyWindow = NSApp.keyWindow {
+            targetWindow = keyWindow
+        }
+        
+        // Second try: Find first visible window on the same screen
+        if targetWindow == nil {
+            let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+            for window in NSApp.windows {
+                if window.isVisible && !window.isExcludedFromWindowsMenu && 
+                   NSIntersectsRect(window.frame, screenFrame) {
+                    targetWindow = window
+                    break
+                }
+            }
+        }
+        
+        // Third try: Create our own window if nothing else works
+        if targetWindow == nil {
+            let overlayWindow = NSWindow(
+                contentRect: NSRect(
+                    x: frame.topLeftX, 
+                    y: frame.topLeftY, 
+                    width: frame.width, 
+                    height: frame.height
+                ),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            
+            overlayWindow.isReleasedWhenClosed = false
+            overlayWindow.level = .floating
+            overlayWindow.backgroundColor = .clear
+            overlayWindow.isOpaque = false
+            overlayWindow.hasShadow = false
+            overlayWindow.ignoresMouseEvents = true
+            
+            // Create view for the border in our custom window
+            let borderLayer = CALayer()
+            borderLayer.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
+            borderLayer.borderWidth = borderWidth
+            borderLayer.borderColor = focusedBorderColor.cgColor
+            
+            let view = NSView(frame: NSRect(x: 0, y: 0, width: frame.width, height: frame.height))
+            view.wantsLayer = true
+            view.layer?.addSublayer(borderLayer)
+            
+            overlayWindow.contentView = view
+            overlayWindow.orderFront(nil)
+            
+            // Store reference
+            self.borderView = view
+            
+            print("DEBUG: Created custom overlay window for border")
+            return
+        }
+        
+        // If we found a window to use, add our border view to it
+        if let window = targetWindow {
             // Create view for the border
             let view = NSView(frame: NSRect(
                 x: frame.topLeftX, 
@@ -66,7 +127,7 @@ class EmptySplitVisual {
             
             print("DEBUG: Border view added to window")
         } else {
-            print("DEBUG: No key window available to add border")
+            print("DEBUG: No suitable window found to add border")
         }
     }
     
@@ -75,6 +136,12 @@ class EmptySplitVisual {
         if let view = borderView {
             print("DEBUG: Hiding border for split \(emptySplit.id)")
             view.removeFromSuperview()
+            // If we have a parent window that is our custom overlay, close it
+            if let parentWindow = view.window, 
+               parentWindow.styleMask == [.borderless], 
+               parentWindow.ignoresMouseEvents {
+                parentWindow.close()
+            }
             borderView = nil
         }
     }

@@ -365,6 +365,45 @@ extension Window {
 
 // The function is private because it's "unsafe". It requires the window to be in unbound state
 private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Workspace, _ app: MacApp) -> BindingData {
+    // Top priority: Always check for empty splits first, regardless of window type
+    // This ensures even dialog windows can be placed in empty splits if available
+    
+    // First, check if there's a focused empty split in the workspace
+    if let focusedEmptySplit = focus.emptySplitOrNil, 
+       focusedEmptySplit.mostRecentWorkspaceParent == workspace {
+        print("DEBUG: Using focused empty split for new window")
+        // Get the parent of the empty split
+        let parent = focusedEmptySplit.parent
+        let ownIndex = focusedEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        focusedEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // Second, check if there are any empty splits in the workspace
+    if let firstEmptySplit = workspace.firstEmptySplitRecursive {
+        print("DEBUG: Using available empty split for new window")
+        // Get the parent of the empty split
+        let parent = firstEmptySplit.parent
+        let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        firstEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no empty splits are available, fall back to original logic
     if !isWindow(axWindow, app) {
         return BindingData(parent: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
     }
