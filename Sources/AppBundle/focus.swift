@@ -104,7 +104,6 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if let oldEmptySplit = oldFocus.emptySplitOrNil, 
        let visual = emptySplitVisuals[oldEmptySplit.id] {
         visual.hideBorder()
-        // hideActiveSplitBorder
     }
 
     _focus = newFocus.frozen
@@ -119,8 +118,8 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
         visual.showBorder()
     }
     
-    // Send notification after focus has changed
-    sendFocusChangeNotification(oldFocus: oldFocus, newFocus: newFocus)
+    // Update focus border directly instead of using notifications
+    updateFocusBorder(oldFocus: oldFocus, newFocus: newFocus)
     
     return status
 }
@@ -215,8 +214,29 @@ private func onFocusedMonitorChanged(_ focus: LiveFocus) {
     if config.onFocusedMonitorChanged.isEmpty { return }
     _ = config.onFocusedMonitorChanged.runCmdSeq(.defaultEnv.withFocus(focus), .emptyStdin)
 }
+
+private func updateFocusBorder(oldFocus: LiveFocus, newFocus: LiveFocus) {
+    if let window = newFocus.windowOrNil {
+        if let topLeft = window.getTopLeftCorner(), 
+           let size = window.getSize() {
+            let focusedFrame = NSRect(x: topLeft.x, y: topLeft.y, 
+                                    width: size.width, height: size.height)
+            FocusedWindowBorder.shared.showBorder(frame: focusedFrame)
+        }
+    } else if let emptySplit = newFocus.emptySplitOrNil, 
+              let rect = emptySplit.getFrameForRendering() {
+        let focusedFrame = NSRect(x: rect.topLeftX, y: rect.topLeftY, 
+                                width: rect.width, height: rect.height)
+        FocusedWindowBorder.shared.showBorder(frame: focusedFrame)
+    } else {
+        FocusedWindowBorder.shared.hideBorder()
+    }
+}
+
 private func onFocusChanged(_ focus: LiveFocus) {
     if config.onFocusChanged.isEmpty { return }
+    // Use nil coalescing to handle optional prevFocus
+    updateFocusBorder(oldFocus: prevFocus ?? focus, newFocus: focus)
     _ = config.onFocusChanged.runCmdSeq(.defaultEnv.withFocus(focus), .emptyStdin)
 }
 
@@ -230,50 +250,5 @@ private func onWorkspaceChanged(_ oldWorkspace: String, _ newWorkspace: String) 
         environment["AEROSPACE_PREV_WORKSPACE"] = oldWorkspace
         process.environment = environment
         Result { try process.run() }.getOrThrow() // todo It's not perfect to fail here
-    }
-}
-
-// Sends notification about focus change with relevant frames
-private func sendFocusChangeNotification(oldFocus: LiveFocus, newFocus: LiveFocus) {
-    // Get the current workspace
-    let workspace = newFocus.workspace
-    
-    // Collect the frames for focused and unfocused windows/splits
-    var focusedFrame: NSRect?
-    var inactiveFrames: [NSRect] = []
-    
-    // Get focused window/split frame
-    if let window = newFocus.windowOrNil {
-        if let topLeft = window.getTopLeftCorner(), let size = window.getSize() {
-            focusedFrame = NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height)
-        }
-    } else if let emptySplit = newFocus.emptySplitOrNil, let rect = emptySplit.getFrameForRendering() {
-        focusedFrame = NSRect(x: rect.topLeftX, y: rect.topLeftY, width: rect.width, height: rect.height)
-    }
-    
-    // Get inactive window frames in the same workspace
-    for window in workspace.allLeafWindowsRecursive {
-        if window != newFocus.windowOrNil, let topLeft = window.getTopLeftCorner(), let size = window.getSize() {
-            inactiveFrames.append(NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height))
-        }
-    }
-    
-    // Get inactive empty split frames
-    for emptySplit in workspace.allEmptySplitsRecursive {
-        if emptySplit != newFocus.emptySplitOrNil, let rect = emptySplit.getFrameForRendering() {
-            inactiveFrames.append(NSRect(x: rect.topLeftX, y: rect.topLeftY, width: rect.width, height: rect.height))
-        }
-    }
-    
-    // Only send notification if we have valid frames
-    if let focusedFrameRect = focusedFrame {
-        NotificationCenter.default.post(
-            name: NSNotification.Name("AeroSpaceFocusChanged"),
-            object: nil,
-            userInfo: [
-                "focusedWindowFrame": focusedFrameRect,
-                "inactiveWindowFrames": inactiveFrames
-            ]
-        )
     }
 }
