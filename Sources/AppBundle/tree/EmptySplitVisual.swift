@@ -6,11 +6,11 @@ class EmptySplitVisual {
     /// The empty split this visual represents
     private let emptySplit: EmptySplit
     
-    /// The window used to render the border
-    private var borderWindow: NSWindow?
+    /// The layer used to render the border
+    private var borderView: NSView?
     
     /// Border color for focused empty split
-    private let focusedBorderColor = NSColor(red: 0.0, green: 0.5, blue: 1.0, alpha: 0.8)
+    private let focusedBorderColor = NSColor(red: 0.0, green: 0.6, blue: 1.0, alpha: 0.9)
     
     /// Border width
     private let borderWidth: CGFloat = 2.0
@@ -18,6 +18,7 @@ class EmptySplitVisual {
     /// Initialize with an empty split
     init(emptySplit: EmptySplit) {
         self.emptySplit = emptySplit
+        print("DEBUG: EmptySplitVisual initialized for split \(emptySplit.id)")
     }
     
     /// Show the border around the empty split
@@ -26,79 +27,76 @@ class EmptySplitVisual {
         hideBorder()
         
         // Get the frame for rendering
-        guard let frame = emptySplit.getFrameForRendering() else { return }
+        guard let frame = emptySplit.getFrameForRendering() else {
+            print("DEBUG: No frame available for rendering, cannot show border")
+            return
+        }
         
-        // Convert to CGRect
-        let rect = CGRect(
-            x: frame.topLeftX,
-            y: frame.topLeftY,
-            width: frame.width,
-            height: frame.height
-        )
+        print("DEBUG: Showing border for split \(emptySplit.id) at \(frame.topLeftX), \(frame.topLeftY), \(frame.width)x\(frame.height)")
         
-        // Create a borderless window to show the border
-        let borderWindow = NSWindow(
-            contentRect: rect,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        
-        // Configure the window
-        borderWindow.level = NSWindow.Level.floating
-        borderWindow.backgroundColor = NSColor.clear
-        borderWindow.isOpaque = false
-        borderWindow.hasShadow = false
-        borderWindow.ignoresMouseEvents = true
-        
-        // Create a view for the border
-        let borderView = BorderView(frame: NSRect(x: 0, y: 0, width: rect.width, height: rect.height))
-        borderView.borderColor = focusedBorderColor
-        borderView.borderWidth = borderWidth
-        
-        // Set the view
-        borderWindow.contentView = borderView
-        
-        // Store the window and show it
-        self.borderWindow = borderWindow
-        borderWindow.orderFront(nil as Any?)
+        // Add simple highlight in parent view
+        if let window = NSApp.keyWindow {
+            // Create view for the border
+            let view = NSView(frame: NSRect(
+                x: frame.topLeftX, 
+                y: frame.topLeftY, 
+                width: frame.width, 
+                height: frame.height
+            ))
+            
+            // Configure the view
+            view.wantsLayer = true
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            
+            // Create border layer
+            let borderLayer = CALayer()
+            borderLayer.frame = view.bounds
+            borderLayer.borderWidth = borderWidth
+            borderLayer.borderColor = focusedBorderColor.cgColor
+            borderLayer.cornerRadius = 0
+            
+            // Add border layer to view
+            view.layer?.addSublayer(borderLayer)
+            
+            // Add view to window
+            window.contentView?.addSubview(view)
+            
+            // Store reference
+            self.borderView = view
+            
+            print("DEBUG: Border view added to window")
+        } else {
+            print("DEBUG: No key window available to add border")
+        }
     }
     
     /// Hide the border
     func hideBorder() {
-        borderWindow?.close()
-        borderWindow = nil
-    }
-}
-
-/// A view that draws a border
-class BorderView: NSView {
-    /// The color of the border
-    var borderColor: NSColor = .blue
-    
-    /// The width of the border
-    var borderWidth: CGFloat = 2.0
-    
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        
-        // Clear the background
-        NSColor.clear.set()
-        dirtyRect.fill()
-        
-        // Draw the border
-        borderColor.set()
-        
-        let borderPath = NSBezierPath(rect: NSRect(
-            x: borderWidth / 2,
-            y: borderWidth / 2,
-            width: bounds.width - borderWidth,
-            height: bounds.height - borderWidth
-        ))
-        borderPath.lineWidth = borderWidth
-        borderPath.stroke()
+        if let view = borderView {
+            print("DEBUG: Hiding border for split \(emptySplit.id)")
+            view.removeFromSuperview()
+            borderView = nil
+        }
     }
 }
 
 /// Global storage for empty split visuals
 var emptySplitVisuals: [UUID: EmptySplitVisual] = [:]
+
+/// Get or create an EmptySplitVisual for the given EmptySplit
+func getOrCreateVisual(for emptySplit: EmptySplit) -> EmptySplitVisual {
+    guard let existingVisual = emptySplitVisuals[emptySplit.id] else {
+        let newVisual = EmptySplitVisual(emptySplit: emptySplit)
+        emptySplitVisuals[emptySplit.id] = newVisual
+        return newVisual
+    }
+    return existingVisual
+}
+
+/// Remove visual for an EmptySplit
+func removeVisual(for id: UUID) {
+    if let visual = emptySplitVisuals[id] {
+        visual.hideBorder()
+        emptySplitVisuals.removeValue(forKey: id)
+    }
+}

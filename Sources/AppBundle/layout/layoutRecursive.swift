@@ -48,10 +48,17 @@ private extension TreeNode {
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
                 return // Nothing to do for weirdos
-            case .emptySplit(_):
+            case .emptySplit(let split):
                 // Layout the empty split
+                print("DEBUG: Setting empty split \(split.id) physical rect to \(physicalRect)")
                 lastAppliedLayoutPhysicalRect = physicalRect
                 lastAppliedLayoutVirtualRect = virtual
+                
+                // Update visual after layout is applied
+                DispatchQueue.main.async {
+                    print("DEBUG: Calling updateVisual after layout for split \(split.id)")
+                    split.updateVisual()
+                }
         }
     }
 }

@@ -16,6 +16,7 @@ class EmptySplit: TreeNode {
         self.id = UUID()
         self.lastFloatingSize = lastFloatingSize
         super.init(parent: parent, adaptiveWeight: adaptiveWeight, index: index)
+        print("DEBUG: EmptySplit created with ID \(id)")
     }
     
     /// Replace this empty split with a window
@@ -24,6 +25,10 @@ class EmptySplit: TreeNode {
         let data = unbindFromParent()
         window.bind(to: parentNode, adaptiveWeight: data.adaptiveWeight, index: data.index)
         window.markAsMostRecentChild()
+        
+        // Clean up visual resources
+        cleanup()
+        
         return true
     }
     
@@ -35,8 +40,15 @@ class EmptySplit: TreeNode {
     /// Focus this empty split
     @discardableResult
     func focusEmptySplit() -> Bool {
+        print("DEBUG: focusEmptySplit called for split \(id)")
         markAsMostRecentChild()
-        return setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
+        let result = setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
+        
+        // Explicitly call updateVisual after focusing
+        print("DEBUG: Explicitly calling updateVisual after focus")
+        updateVisual()
+        
+        return result
     }
     
     /// Convert to LiveFocus
@@ -46,15 +58,30 @@ class EmptySplit: TreeNode {
     
     /// Update the visual representation of this empty split
     func updateVisual() {
-        // Get the visual for this empty split
-        let visual = emptySplitVisuals[id] ?? {
-            let newVisual = EmptySplitVisual(emptySplit: self)
-            emptySplitVisuals[id] = newVisual
-            return newVisual
-        }()
+        print("DEBUG: updateVisual called for split \(id)")
+        
+        // Check if we have a valid frame for rendering
+        let frame = getFrameForRendering()
+        print("DEBUG: Frame for rendering: \(String(describing: frame))")
+        
+        // Use the helper function to get or create a visual
+        let visual = getOrCreateVisual(for: self)
         
         // Show the border
+        print("DEBUG: Calling showBorder() on visual")
         visual.showBorder()
+    }
+    
+    /// Clean up when this empty split is removed
+    func cleanup() {
+        print("DEBUG: Cleaning up emptySplit \(id)")
+        removeVisual(for: id)
+    }
+    
+    /// Deinitializer to ensure cleanup
+    deinit {
+        print("DEBUG: Deinitializing emptySplit \(id)")
+        cleanup()
     }
     
     /// Get the containing workspace
