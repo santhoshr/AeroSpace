@@ -78,6 +78,8 @@ extension CmdArgs {
                 command = WorkspaceCommand(args: self as! WorkspaceCmdArgs)
             case .workspaceBackAndForth:
                 command = WorkspaceBackAndForthCommand(args: self as! WorkspaceBackAndForthCmdArgs)
+            case .notionSplit:
+                command = NotionSplitCommand(args: self as! NotionSplitCmdArgs)
         }
         check(command.info == Self.info)
         return command
