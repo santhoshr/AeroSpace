@@ -52,11 +52,6 @@ private extension TreeNode {
                 // Layout the empty split
                 lastAppliedLayoutPhysicalRect = physicalRect
                 lastAppliedLayoutVirtualRect = virtual
-                
-                // Update visual after layout is applied
-                DispatchQueue.main.async {
-                    split.updateVisual()
-                }
         }
     }
 }

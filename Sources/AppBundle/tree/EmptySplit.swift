@@ -24,10 +24,6 @@ class EmptySplit: TreeNode {
         let data = unbindFromParent()
         window.bind(to: parentNode, adaptiveWeight: data.adaptiveWeight, index: data.index)
         window.markAsMostRecentChild()
-        
-        // Clean up visual resources
-        cleanup()
-        
         return true
     }
     
@@ -40,31 +36,12 @@ class EmptySplit: TreeNode {
     @discardableResult
     func focusEmptySplit() -> Bool {
         markAsMostRecentChild()
-        let result = setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
-        updateVisual()
-        return result
+        return setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
     }
     
     /// Convert to LiveFocus
     func toLiveFocusOrNil() -> LiveFocus? {
         return LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent)
-    }
-    
-    /// Update the visual representation of this empty split
-    func updateVisual() {
-        let frame = getFrameForRendering()
-        let visual = getOrCreateVisual(for: self)
-        visual.showBorder()
-    }
-    
-    /// Clean up when this empty split is removed
-    func cleanup() {
-        removeVisual(for: id)
-    }
-    
-    /// Deinitializer to ensure cleanup
-    deinit {
-        cleanup()
     }
     
     /// Get the containing workspace

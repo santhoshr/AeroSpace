@@ -395,7 +395,6 @@ private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Wo
     
     // Second, check if there are any empty splits in the workspace
     if let firstEmptySplit = workspace.firstEmptySplitRecursive {
-        print("DEBUG: Using available empty split for new window")
         // Get the parent of the empty split
         let parent = firstEmptySplit.parent
         let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0

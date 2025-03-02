@@ -45,10 +45,6 @@ struct LiveFocus: AeroAny, Equatable {
     var hasLeafFocus: Bool {
         return windowOrNil != nil || emptySplitOrNil != nil
     }
-    
-    func updateEmptySplitVisual() {
-        emptySplitOrNil?.updateVisual()
-    }
 }
 
 /// "old", "captured", "frozen in time" Focus
@@ -99,18 +95,11 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if oldFocus.workspace != newFocus.workspace {
         oldFocus.windowOrNil?.markAsMostRecentChild()
     }
-    
-    // Hide old empty split borders
-    if let oldEmptySplit = oldFocus.emptySplitOrNil, 
-       let visual = emptySplitVisuals[oldEmptySplit.id] {
-        visual.hideBorder()
-    }
 
     _focus = newFocus.frozen
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
     newFocus.windowOrNil?.markAsMostRecentChild()
-    newFocus.updateEmptySplitVisual()
     return status
 }
 extension Window {
