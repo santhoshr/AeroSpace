@@ -7,6 +7,7 @@ public struct SplitCmdArgs: CmdArgs {
         help: split_help_generated,
         options: [
             "--window-id": optionalWindowIdFlag(),
+            "--empty": trueBoolFlag(\.createEmpty),
         ],
         arguments: [newArgParser(\.arg, parseSplitArg, mandatoryArgPlaceholder: SplitArg.unionLiteral)]
     )
@@ -14,10 +15,12 @@ public struct SplitCmdArgs: CmdArgs {
     public var arg: Lateinit<SplitArg> = .uninitialized
     public var windowId: UInt32?
     public var workspaceName: WorkspaceName?
+    public var createEmpty: Bool = false
 
-    public init(rawArgs: [String], _ arg: SplitArg) {
+    public init(rawArgs: [String], _ arg: SplitArg, createEmpty: Bool = false) {
         self.rawArgs = .init(rawArgs)
         self.arg = .initialized(arg)
+        self.createEmpty = createEmpty
     }
 
     public enum SplitArg: String, CaseIterable {

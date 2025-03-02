@@ -19,6 +19,7 @@ private func collectAllWindowIds(workspace: FrozenWorkspace) -> [UInt32] {
 private func collectAllWindowIdsRecursive(node: FrozenTreeNode) -> [UInt32] {
     switch node {
         case .window(let w): [w.id]
+        case .emptySplit: [] 
         case .container(let c):
             c.children.reduce(into: [UInt32]()) { partialResult, elem in
                 partialResult += collectAllWindowIdsRecursive(node: elem)

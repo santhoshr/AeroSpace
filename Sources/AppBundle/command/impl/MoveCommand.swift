@@ -19,9 +19,16 @@ struct MoveCommand: Command {
                     switch parent.children[indexOfSiblingTarget].tilingTreeNodeCasesOrThrow() {
                         case .tilingContainer(let topLevelSiblingTargetContainer):
                             deepMoveIn(window: currentWindow, into: topLevelSiblingTargetContainer, moveDirection: direction)
-                        case .window: // "swap windows"
-                            let prevBinding = currentWindow.unbindFromParent()
-                            currentWindow.bind(to: parent, adaptiveWeight: prevBinding.adaptiveWeight, index: indexOfSiblingTarget)
+                        case .window(let targetWindow):
+                            // Swap the positions of the windows
+                            let currentData = currentWindow.unbindFromParent()
+                            let targetData = targetWindow.unbindFromParent()
+                            currentWindow.bind(to: parent, adaptiveWeight: targetData.adaptiveWeight, index: targetData.index)
+                            targetWindow.bind(to: parent, adaptiveWeight: currentData.adaptiveWeight, index: currentData.index)
+                        case .emptySplit(let emptySplit):
+                            // Replace the empty split with the window
+                            currentWindow.unbindFromParent()
+                            _ = emptySplit.replaceWithWindow(currentWindow)
                     }
                     return true
                 } else {
@@ -54,23 +61,11 @@ private func moveOut(_ io: CmdIo, window: Window, direction: CardinalDirection) 
         case .tilingContainer(let parent):
             check(parent.orientation == direction.orientation)
             bindTo = parent
-            bindToIndex = innerMostChild.ownIndex + direction.insertionOffset
-        case .workspace(let parent): // create implicit container
-            let prevRoot = parent.rootTilingContainer
-            prevRoot.unbindFromParent()
-            // Force tiles layout
-            _ = TilingContainer(parent: parent, adaptiveWeight: WEIGHT_AUTO, direction.orientation, .tiles, index: 0)
-            check(prevRoot != parent.rootTilingContainer)
-            prevRoot.bind(to: parent.rootTilingContainer, adaptiveWeight: WEIGHT_AUTO, index: 0)
-
-            bindTo = parent.rootTilingContainer
-            bindToIndex = direction.insertionOffset
-        case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
-            return io.err(moveOutMacosUnconventionalWindow)
-        case .macosPopupWindowsContainer:
-            return false // Impossible
-        case .window:
-            error("Window can't contain children nodes")
+            bindToIndex = innerMostChild.ownIndex + (direction.isPositive ? 1 : 0)
+        case .workspace, .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, 
+             .macosHiddenAppsWindowsContainer, .macosPopupWindowsContainer, .emptySplit, .window:
+            // These cases are impossible by invariant
+            return false 
     }
 
     window.bind(
@@ -92,6 +87,9 @@ private func deepMoveIn(window: Window, into container: TilingContainer, moveDir
                 adaptiveWeight: WEIGHT_AUTO,
                 index: deepTarget.ownIndex + 1
             )
+        case .emptySplit(let deepTarget):
+            window.unbindFromParent()
+            _ = deepTarget.replaceWithWindow(window)
     }
 }
 
@@ -108,6 +106,9 @@ private extension TilingTreeNodeCases {
                         .tilingTreeNodeCasesOrThrow()
                         .findDeepMoveInTargetRecursive(orientation)
                 }
+            case .emptySplit:
+                // Empty splits are leaf nodes that can be replaced
+                self
         }
     }
 }

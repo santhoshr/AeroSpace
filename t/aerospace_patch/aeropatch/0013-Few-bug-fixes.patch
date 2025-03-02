@@ -1,0 +1,392 @@
+From be3e71eb5a0d4aa58c090440757033ae153b8302 Mon Sep 17 00:00:00 2001
+From: santhoshr <santhoshr@live.com>
+Date: Sun, 2 Mar 2025 17:55:09 +0530
+Subject: [PATCH] Few bug fixes
+
+---
+ .../command/impl/NotionSplitCommand.swift     |  85 +++++++++----
+ Sources/AppBundle/config/Config.swift         |   1 +
+ Sources/AppBundle/config/parseConfig.swift    |   1 +
+ Sources/AppBundle/initAppBundle.swift         |   8 ++
+ Sources/AppBundle/util/BorderOverlay.swift    | 113 ++++++++++--------
+ Sources/Common/cmdArgs/ArgParser.swift        |  19 +++
+ .../cmdArgs/impl/NotionSplitCmdArgs.swift     |  12 +-
+ 7 files changed, 167 insertions(+), 72 deletions(-)
+
+diff --git a/Sources/AppBundle/command/impl/NotionSplitCommand.swift b/Sources/AppBundle/command/impl/NotionSplitCommand.swift
+index 858b76b..7ba3d99 100644
+--- a/Sources/AppBundle/command/impl/NotionSplitCommand.swift
++++ b/Sources/AppBundle/command/impl/NotionSplitCommand.swift
+@@ -15,10 +15,19 @@ struct NotionSplitCommand: Command {
+         // Clear any existing borders
+         clearAllBorders()
+         
+-        // Get the orientation from the arguments
+-        let orientation: Orientation = switch args.arg.val {
+-            case .vertical: .v
+-            case .horizontal: .h
++        // Determine the orientation based on the arguments or screen dimensions
++        var orientation: Orientation
++        if args.arg.isInitialized {
++            // Use the orientation from the arguments if provided
++            orientation = switch args.arg.val {
++                case .vertical: .v
++                case .horizontal: .h
++            }
++        } else {
++            // Auto-determine orientation based on screen dimensions
++            let monitor = workspace.workspaceMonitor
++            let frame = monitor.rect
++            orientation = frame.width > frame.height ? .h : .v
+         }
+         
+         // Get the root tiling container
+@@ -27,42 +36,72 @@ struct NotionSplitCommand: Command {
+         // Create a new container with the specified orientation
+         rootContainer.changeOrientation(orientation)
+         
+-        // Move all existing windows to the first container
++        // Get all existing windows
++        let windowsToMove = rootContainer.children.filterIsInstance(of: Window.self)
++        
++        // Create the first container with accordion layout
+         let firstContainer = TilingContainer(
+             parent: rootContainer,
+             adaptiveWeight: WEIGHT_AUTO,
+-            orientation.opposite,
+-            .tiles,
++            orientation.opposite, // Use opposite orientation for nested containers
++            .accordion, // Use accordion layout for the container
+             index: 0
+         )
+         
+-        // Move all windows from root to first container
+-        let windowsToMove = rootContainer.children.filterIsInstance(of: Window.self)
+-        for window in windowsToMove {
+-            let data = window.unbindFromParent()
+-            window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
+-        }
+-        
+-        // Create a new empty container for the right/bottom half
+-        let newContainer = TilingContainer(
++        // Create the second container with accordion layout
++        let secondContainer = TilingContainer(
+             parent: rootContainer,
+             adaptiveWeight: WEIGHT_AUTO,
+-            orientation.opposite,
+-            .tiles,
++            orientation.opposite, // Use opposite orientation for nested containers
++            .accordion, // Use accordion layout for the container
+             index: INDEX_BIND_LAST
+         )
+         
+-        // Focus the new container
+-        newContainer.markAsMostRecentChild()
++        // If there are windows, distribute them between the containers
++        if !windowsToMove.isEmpty {
++            // Move approximately half of the windows to the first container
++            let halfIndex = max(1, windowsToMove.count / 2)
++            
++            for (index, window) in windowsToMove.enumerated() {
++                let data = window.unbindFromParent()
++                if index < halfIndex {
++                    // First half goes to the first container
++                    window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
++                } else {
++                    // Second half goes to the second container
++                    window.bind(to: secondContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
++                }
++            }
++        }
++        
++        // Focus the second container
++        secondContainer.markAsMostRecentChild()
+         
+         // Refresh the layout
+         workspace.layoutWorkspace()
+         
+-        if let rect = newContainer.lastAppliedLayoutPhysicalRect {
+-            // Use our custom border implementation instead of JankyBorders
+-            createBorder(for: rect, color: NSColor.orange, thickness: 5.0)
++        // Add borders to empty containers
++        if windowsToMove.isEmpty || windowsToMove.count <= 1 {
++            if let rect = firstContainer.lastAppliedLayoutPhysicalRect, firstContainer.children.isEmpty {
++                createBorder(for: rect, color: NSColor.blue, thickness: 5.0)
++            }
++            
++            if let rect = secondContainer.lastAppliedLayoutPhysicalRect, secondContainer.children.isEmpty {
++                createBorder(for: rect, color: NSColor.orange, thickness: 5.0)
++            }
+         }
+         
+         return true
+     }
++    
++    // Helper function to clear all borders
++    private func clearAllBorders() {
++        // Clear any existing borders
++        BorderManager.shared.removeAllBorders()
++    }
++    
++    // Helper function to create a border
++    private func createBorder(for rect: Rect, color: NSColor, thickness: CGFloat) {
++        BorderManager.shared.createBorder(for: rect, color: color, thickness: thickness)
++    }
+ } 
+\ No newline at end of file
+diff --git a/Sources/AppBundle/config/Config.swift b/Sources/AppBundle/config/Config.swift
+index 2c0aad9..940a4a4 100644
+--- a/Sources/AppBundle/config/Config.swift
++++ b/Sources/AppBundle/config/Config.swift
+@@ -45,6 +45,7 @@ struct Config: Copyable {
+     var execOnWorkspaceChange: [String] = [] // todo deprecate
+     var keyMapping = KeyMapping()
+     var execConfig: ExecConfig = ExecConfig()
++    var enableManualTiling: Bool = false
+ 
+     var onFocusChanged: [any Command] = []
+     // var onFocusedWorkspaceChanged: [any Command] = []
+diff --git a/Sources/AppBundle/config/parseConfig.swift b/Sources/AppBundle/config/parseConfig.swift
+index bca2b5d..ba884c7 100644
+--- a/Sources/AppBundle/config/parseConfig.swift
++++ b/Sources/AppBundle/config/parseConfig.swift
+@@ -96,6 +96,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
+ 
+     "enable-normalization-flatten-containers": Parser(\.enableNormalizationFlattenContainers, parseBool),
+     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
++    "enable-manual-tiling": Parser(\.enableManualTiling, parseBool),
+ 
+     "default-root-container-layout": Parser(\.defaultRootContainerLayout, parseLayout),
+     "default-root-container-orientation": Parser(\.defaultRootContainerOrientation, parseDefaultContainerOrientation),
+diff --git a/Sources/AppBundle/initAppBundle.swift b/Sources/AppBundle/initAppBundle.swift
+index 87f0b6e..de40fd3 100644
+--- a/Sources/AppBundle/initAppBundle.swift
++++ b/Sources/AppBundle/initAppBundle.swift
+@@ -31,6 +31,14 @@ public func initAppBundle() {
+             _ = config.afterLoginCommand.runCmdSeq(.defaultEnv, .emptyStdin)
+         }
+         _ = config.afterStartupCommand.runCmdSeq(.defaultEnv, .emptyStdin)
++        
++        // If manual tiling is enabled, run the NotionSplitCommand
++        if config.enableManualTiling {
++            // Create and run the NotionSplitCommand
++            let notionSplitArgs = NotionSplitCmdArgs(rawArgs: [])
++            let notionSplitCommand = NotionSplitCommand(args: notionSplitArgs)
++            _ = notionSplitCommand.run(.defaultEnv, .emptyStdin)
++        }
+     }
+ }
+ 
+diff --git a/Sources/AppBundle/util/BorderOverlay.swift b/Sources/AppBundle/util/BorderOverlay.swift
+index 04b4dee..0cb844d 100644
+--- a/Sources/AppBundle/util/BorderOverlay.swift
++++ b/Sources/AppBundle/util/BorderOverlay.swift
+@@ -1,74 +1,93 @@
+ import AppKit
+ import Common
+ 
+-// A singleton class to manage border overlays
++/// A class to manage border overlays for windows
+ class BorderManager {
++    /// Shared instance for singleton access
+     static let shared = BorderManager()
+     
+-    private var borderWindows: [NSWindow] = []
++    /// Array to keep track of all active border windows
++    private var activeBorders: [NSWindow] = []
+     
++    /// Private initializer for singleton pattern
+     private init() {}
+     
+-    func clearAllBorders() {
+-        for window in borderWindows {
+-            window.orderOut(nil)
+-        }
+-        borderWindows.removeAll()
++    /// Creates a border around the specified rectangle
++    /// - Parameters:
++    ///   - rect: The rectangle to create a border around
++    ///   - color: The color of the border
++    ///   - thickness: The thickness of the border
++    func createBorder(for rect: Rect, color: NSColor, thickness: CGFloat) {
++        // Create a window for the border
++        let borderWindow = NSWindow(
++            contentRect: NSRect(x: rect.topLeftX, y: rect.topLeftY - rect.height, width: rect.width, height: rect.height),
++            styleMask: [.borderless],
++            backing: .buffered,
++            defer: false
++        )
++        
++        // Configure the window
++        borderWindow.backgroundColor = NSColor.clear
++        borderWindow.isOpaque = false
++        borderWindow.hasShadow = false
++        borderWindow.level = NSWindow.Level.floating
++        borderWindow.ignoresMouseEvents = true
++        
++        // Create a view for the border
++        let borderView = BorderView(frame: NSRect(x: 0, y: 0, width: rect.width, height: rect.height))
++        borderView.borderColor = color
++        borderView.borderThickness = thickness
++        
++        // Set the view as the window's content view
++        borderWindow.contentView = borderView
++        
++        // Show the window
++        borderWindow.orderFront(nil as Any?)
++        
++        // Add to active borders
++        activeBorders.append(borderWindow)
+     }
+     
+-    func createBorderForRect(_ rect: Rect, color: NSColor = .orange, thickness: CGFloat = 5.0) {
+-        // Create four windows for each side of the rectangle
+-        createBorderSide(rect, .top, color, thickness)
+-        createBorderSide(rect, .right, color, thickness)
+-        createBorderSide(rect, .bottom, color, thickness)
+-        createBorderSide(rect, .left, color, thickness)
++    /// Removes all active borders
++    func removeAllBorders() {
++        for window in activeBorders {
++            window.orderOut(nil as Any?)
++        }
++        activeBorders.removeAll()
+     }
++}
++
++/// A custom view that draws a border
++class BorderView: NSView {
++    /// The color of the border
++    var borderColor: NSColor = .orange
+     
+-    private enum BorderSide {
+-        case top, right, bottom, left
+-    }
++    /// The thickness of the border
++    var borderThickness: CGFloat = 5.0
+     
+-    private func createBorderSide(_ rect: Rect, _ side: BorderSide, _ color: NSColor, _ thickness: CGFloat) {
+-        var borderRect = NSRect.zero
+-        
+-        switch side {
+-        case .top:
+-            borderRect = NSRect(x: rect.topLeftX, y: rect.topLeftY - thickness, width: rect.width, height: thickness)
+-        case .right:
+-            borderRect = NSRect(x: rect.topLeftX + rect.width, y: rect.topLeftY - rect.height, width: thickness, height: rect.height)
+-        case .bottom:
+-            borderRect = NSRect(x: rect.topLeftX, y: rect.topLeftY - rect.height, width: rect.width, height: thickness)
+-        case .left:
+-            borderRect = NSRect(x: rect.topLeftX - thickness, y: rect.topLeftY - rect.height, width: thickness, height: rect.height)
+-        }
+-        
+-        let window = NSWindow(
+-            contentRect: borderRect,
+-            styleMask: .borderless,
+-            backing: .buffered,
+-            defer: false
+-        )
++    override func draw(_ dirtyRect: NSRect) {
++        super.draw(dirtyRect)
+         
+-        window.backgroundColor = color
+-        window.isOpaque = false
+-        window.hasShadow = false
+-        window.level = .floating
+-        window.ignoresMouseEvents = true
++        // Clear the background
++        NSColor.clear.set()
++        dirtyRect.fill()
+         
+-        // Make the window visible
+-        window.orderFront(nil)
++        // Set the border color
++        borderColor.set()
+         
+-        // Store the window
+-        borderWindows.append(window)
++        // Draw the border
++        let borderPath = NSBezierPath(rect: bounds)
++        borderPath.lineWidth = borderThickness
++        borderPath.stroke()
+     }
+ }
+ 
+ // Helper function to create a border for a rectangle
+ func createBorder(for rect: Rect, color: NSColor = .orange, thickness: CGFloat = 5.0) {
+-    BorderManager.shared.createBorderForRect(rect, color: color, thickness: thickness)
++    BorderManager.shared.createBorder(for: rect, color: color, thickness: thickness)
+ }
+ 
+ // Helper function to clear all borders
+ func clearAllBorders() {
+-    BorderManager.shared.clearAllBorders()
++    BorderManager.shared.removeAllBorders()
+ } 
+\ No newline at end of file
+diff --git a/Sources/Common/cmdArgs/ArgParser.swift b/Sources/Common/cmdArgs/ArgParser.swift
+index 27c92f5..4f3fc9b 100644
+--- a/Sources/Common/cmdArgs/ArgParser.swift
++++ b/Sources/Common/cmdArgs/ArgParser.swift
+@@ -112,3 +112,22 @@ public func parseArgWithWorkspaceName(arg: String, nextArgs: inout [String]) ->
+ }
+ 
+ func upcastArgParserFun<T>(_ fun: @escaping ArgParserFun<T>) -> ArgParserFun<T?> { { fun($0, &$1).map { $0 } } }
++
++/// Creates an optional argument parser that returns uninitialized if no argument is provided
++/// or if the next argument is a flag
++public func optionalArgParser<T: Copyable, K>(
++    _ keyPath: WritableKeyPath<T, Lateinit<K>>,
++    _ parse: @escaping (String, inout [String]) -> Parsed<K>,
++    optionalArgPlaceholder: String
++) -> ArgParser<T, Lateinit<K>> {
++    let parseWrapper: (String, inout [String]) -> Parsed<Lateinit<K>> = { arg, nextArgs in
++        // If there are no more arguments or the next argument is a flag (starts with -),
++        // return uninitialized
++        if nextArgs.isEmpty || (nextArgs.first?.starts(with: "-") ?? false) {
++            return .success(.uninitialized)
++        }
++        // Otherwise, parse the argument
++        return parse(arg, &nextArgs).map { .initialized($0) }
++    }
++    return ArgParser(keyPath, parseWrapper, argPlaceholderIfMandatory: nil)
++}
+diff --git a/Sources/Common/cmdArgs/impl/NotionSplitCmdArgs.swift b/Sources/Common/cmdArgs/impl/NotionSplitCmdArgs.swift
+index fa22434..d4469b8 100644
+--- a/Sources/Common/cmdArgs/impl/NotionSplitCmdArgs.swift
++++ b/Sources/Common/cmdArgs/impl/NotionSplitCmdArgs.swift
+@@ -2,7 +2,11 @@ import Foundation
+ 
+ public struct NotionSplitCmdArgs: CmdArgs {
+     public let rawArgs: EquatableNoop<[String]>
+-    fileprivate init(rawArgs: [String]) { self.rawArgs = .init(rawArgs) }
++    public init(rawArgs: [String]) { 
++        self.rawArgs = .init(rawArgs)
++        // Leave arg as uninitialized, so orientation will be auto-determined
++    }
++    
+     public static let parser: CmdParser<Self> = cmdParser(
+         kind: .notionSplit,
+         allowInConfig: true,
+@@ -10,7 +14,7 @@ public struct NotionSplitCmdArgs: CmdArgs {
+         options: [
+             "--window-id": optionalWindowIdFlag(),
+         ],
+-        arguments: [newArgParser(\.arg, parseNotionSplitOrientation, mandatoryArgPlaceholder: NotionSplitOrientation.unionLiteral)]
++        arguments: [optionalArgParser(\.arg, parseNotionSplitOrientation, optionalArgPlaceholder: "horizontal|vertical")]
+     )
+ 
+     public var arg: Lateinit<NotionSplitOrientation> = .uninitialized
+@@ -24,6 +28,10 @@ public struct NotionSplitCmdArgs: CmdArgs {
+ 
+     public enum NotionSplitOrientation: String, CaseIterable {
+         case horizontal, vertical
++        
++        static var unionLiteral: String {
++            return "horizontal|vertical"
++        }
+     }
+ }
+ 
+-- 
+2.39.5 (Apple Git-154)
+

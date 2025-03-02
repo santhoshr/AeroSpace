@@ -17,14 +17,36 @@ struct FocusCommand: Command {
 
         switch args.target {
             case .direction(let direction):
+                // Handle window focus
                 let window = target.windowOrNil
-                if let (parent, ownIndex) = window?.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
-                    guard let windowToFocus = parent.children[ownIndex + direction.focusOffset]
-                        .findFocusTargetRecursive(snappedTo: direction.opposite) else { return false }
-                    return windowToFocus.focusWindow()
-                } else {
+                let emptySplit = target.emptySplitOrNil
+                
+                // If we have a focused window, use it for navigation
+                if let window = window {
+                    if let (parent, ownIndex) = window.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
+                        guard let windowToFocus = (parent.children[ownIndex + direction.focusOffset] as TreeNode)
+                            .findFocusWindowRecursive(snappedTo: direction.opposite) else { return false }
+                        
+                        return windowToFocus.focusWindow()
+                    } else {
+                        return hitWorkspaceBoundaries(target, io, args, direction)
+                    }
+                }
+                // If we have a focused empty split, use it for navigation
+                else if let emptySplit = emptySplit {
+                    if let (parent, ownIndex) = emptySplit.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
+                        guard let windowToFocus = (parent.children[ownIndex + direction.focusOffset] as TreeNode)
+                            .findFocusWindowRecursive(snappedTo: direction.opposite) else { return false }
+                        
+                        return windowToFocus.focusWindow()
+                    } else {
+                        return hitWorkspaceBoundaries(target, io, args, direction)
+                    }
+                }
+                else {
                     return hitWorkspaceBoundaries(target, io, args, direction)
                 }
+                
             case .windowId(let windowId):
                 if let windowToFocus = Window.get(byId: windowId) {
                     return windowToFocus.focusWindow()
@@ -82,15 +104,16 @@ private func hitAllMonitorsOuterFrameBoundaries(
         case .wrapAroundTheWorkspace:
             return wrapAroundTheWorkspace(target, io, direction)
         case .wrapAroundAllMonitors:
-            wrappedMonitor.activeWorkspace.findFocusTargetRecursive(snappedTo: direction.opposite)?.markAsMostRecentChild()
+            wrappedMonitor.activeWorkspace.findFocusWindowRecursive(snappedTo: direction.opposite)?.markAsMostRecentChild()
             return wrappedMonitor.activeWorkspace.focusWorkspace()
     }
 }
 
 private func wrapAroundTheWorkspace(_ target: LiveFocus, _ io: CmdIo, _ direction: CardinalDirection) -> Bool {
-    guard let windowToFocus = target.workspace.findFocusTargetRecursive(snappedTo: direction.opposite) else {
+    guard let windowToFocus = (target.workspace as TreeNode).findFocusWindowRecursive(snappedTo: direction.opposite) else {
         return io.err(noWindowIsFocused)
     }
+    
     return windowToFocus.focusWindow()
 }
 
@@ -143,22 +166,24 @@ private struct FloatingWindowData {
 }
 
 private extension TreeNode {
-    func findFocusTargetRecursive(snappedTo direction: CardinalDirection) -> Window? {
+    func findFocusWindowRecursive(snappedTo direction: CardinalDirection) -> Window? {
         switch nodeCases {
             case .workspace(let workspace):
-                return workspace.rootTilingContainer.findFocusTargetRecursive(snappedTo: direction)
+                return workspace.rootTilingContainer.findFocusWindowRecursive(snappedTo: direction)
             case .window(let window):
                 return window
             case .tilingContainer(let container):
-                if direction.orientation == container.orientation {
-                    return (direction.isPositive ? container.children.last : container.children.first)?
-                        .findFocusTargetRecursive(snappedTo: direction)
-                } else {
-                    return mostRecentChild?.findFocusTargetRecursive(snappedTo: direction)
-                }
-            case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
-                 .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
-                error("Impossible")
+                return container.mostRecentChild?.findFocusWindowRecursive(snappedTo: direction)
+            case .macosMinimizedWindowsContainer:
+                return nil
+            case .macosHiddenAppsWindowsContainer:
+                return nil
+            case .macosFullscreenWindowsContainer:
+                return nil
+            case .macosPopupWindowsContainer:
+                return nil
+            case .emptySplit:
+                return nil // Empty splits are not windows
         }
     }
 }

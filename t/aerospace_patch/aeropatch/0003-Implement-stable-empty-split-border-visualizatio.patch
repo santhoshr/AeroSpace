@@ -1,0 +1,285 @@
+From e52966c2ddcaf008a9da60dcd05107096d88169c Mon Sep 17 00:00:00 2001
+From: santhoshr <santhoshr@live.com>
+Date: Thu, 27 Feb 2025 23:48:19 +0530
+Subject: [PATCH] Implement stable empty split border visualization using
+ CALayer approach
+
+---
+ .../AppBundle/layout/layoutRecursive.swift    |   9 +-
+ Sources/AppBundle/tree/EmptySplit.swift       |  41 +++++-
+ Sources/AppBundle/tree/EmptySplitVisual.swift | 132 +++++++++---------
+ 3 files changed, 107 insertions(+), 75 deletions(-)
+
+diff --git a/Sources/AppBundle/layout/layoutRecursive.swift b/Sources/AppBundle/layout/layoutRecursive.swift
+index 449d1ef..dd9737b 100644
+--- a/Sources/AppBundle/layout/layoutRecursive.swift
++++ b/Sources/AppBundle/layout/layoutRecursive.swift
+@@ -48,10 +48,17 @@ private extension TreeNode {
+             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
+                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
+                 return // Nothing to do for weirdos
+-            case .emptySplit(_):
++            case .emptySplit(let split):
+                 // Layout the empty split
++                print("DEBUG: Setting empty split \(split.id) physical rect to \(physicalRect)")
+                 lastAppliedLayoutPhysicalRect = physicalRect
+                 lastAppliedLayoutVirtualRect = virtual
++                
++                // Update visual after layout is applied
++                DispatchQueue.main.async {
++                    print("DEBUG: Calling updateVisual after layout for split \(split.id)")
++                    split.updateVisual()
++                }
+         }
+     }
+ }
+diff --git a/Sources/AppBundle/tree/EmptySplit.swift b/Sources/AppBundle/tree/EmptySplit.swift
+index 85c4865..4f193e7 100644
+--- a/Sources/AppBundle/tree/EmptySplit.swift
++++ b/Sources/AppBundle/tree/EmptySplit.swift
+@@ -16,6 +16,7 @@ class EmptySplit: TreeNode {
+         self.id = UUID()
+         self.lastFloatingSize = lastFloatingSize
+         super.init(parent: parent, adaptiveWeight: adaptiveWeight, index: index)
++        print("DEBUG: EmptySplit created with ID \(id)")
+     }
+     
+     /// Replace this empty split with a window
+@@ -24,6 +25,10 @@ class EmptySplit: TreeNode {
+         let data = unbindFromParent()
+         window.bind(to: parentNode, adaptiveWeight: data.adaptiveWeight, index: data.index)
+         window.markAsMostRecentChild()
++        
++        // Clean up visual resources
++        cleanup()
++        
+         return true
+     }
+     
+@@ -35,8 +40,15 @@ class EmptySplit: TreeNode {
+     /// Focus this empty split
+     @discardableResult
+     func focusEmptySplit() -> Bool {
++        print("DEBUG: focusEmptySplit called for split \(id)")
+         markAsMostRecentChild()
+-        return setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
++        let result = setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
++        
++        // Explicitly call updateVisual after focusing
++        print("DEBUG: Explicitly calling updateVisual after focus")
++        updateVisual()
++        
++        return result
+     }
+     
+     /// Convert to LiveFocus
+@@ -46,17 +58,32 @@ class EmptySplit: TreeNode {
+     
+     /// Update the visual representation of this empty split
+     func updateVisual() {
+-        // Get the visual for this empty split
+-        let visual = emptySplitVisuals[id] ?? {
+-            let newVisual = EmptySplitVisual(emptySplit: self)
+-            emptySplitVisuals[id] = newVisual
+-            return newVisual
+-        }()
++        print("DEBUG: updateVisual called for split \(id)")
++        
++        // Check if we have a valid frame for rendering
++        let frame = getFrameForRendering()
++        print("DEBUG: Frame for rendering: \(String(describing: frame))")
++        
++        // Use the helper function to get or create a visual
++        let visual = getOrCreateVisual(for: self)
+         
+         // Show the border
++        print("DEBUG: Calling showBorder() on visual")
+         visual.showBorder()
+     }
+     
++    /// Clean up when this empty split is removed
++    func cleanup() {
++        print("DEBUG: Cleaning up emptySplit \(id)")
++        removeVisual(for: id)
++    }
++    
++    /// Deinitializer to ensure cleanup
++    deinit {
++        print("DEBUG: Deinitializing emptySplit \(id)")
++        cleanup()
++    }
++    
+     /// Get the containing workspace
+     var mostRecentWorkspaceParent: Workspace {
+         let fullParentChain = parentsWithSelf
+diff --git a/Sources/AppBundle/tree/EmptySplitVisual.swift b/Sources/AppBundle/tree/EmptySplitVisual.swift
+index 1912f9d..b1bbb47 100644
+--- a/Sources/AppBundle/tree/EmptySplitVisual.swift
++++ b/Sources/AppBundle/tree/EmptySplitVisual.swift
+@@ -6,11 +6,11 @@ class EmptySplitVisual {
+     /// The empty split this visual represents
+     private let emptySplit: EmptySplit
+     
+-    /// The window used to render the border
+-    private var borderWindow: NSWindow?
++    /// The layer used to render the border
++    private var borderView: NSView?
+     
+     /// Border color for focused empty split
+-    private let focusedBorderColor = NSColor(red: 0.0, green: 0.5, blue: 1.0, alpha: 0.8)
++    private let focusedBorderColor = NSColor(red: 0.0, green: 0.6, blue: 1.0, alpha: 0.9)
+     
+     /// Border width
+     private let borderWidth: CGFloat = 2.0
+@@ -18,6 +18,7 @@ class EmptySplitVisual {
+     /// Initialize with an empty split
+     init(emptySplit: EmptySplit) {
+         self.emptySplit = emptySplit
++        print("DEBUG: EmptySplitVisual initialized for split \(emptySplit.id)")
+     }
+     
+     /// Show the border around the empty split
+@@ -26,79 +27,76 @@ class EmptySplitVisual {
+         hideBorder()
+         
+         // Get the frame for rendering
+-        guard let frame = emptySplit.getFrameForRendering() else { return }
++        guard let frame = emptySplit.getFrameForRendering() else {
++            print("DEBUG: No frame available for rendering, cannot show border")
++            return
++        }
+         
+-        // Convert to CGRect
+-        let rect = CGRect(
+-            x: frame.topLeftX,
+-            y: frame.topLeftY,
+-            width: frame.width,
+-            height: frame.height
+-        )
++        print("DEBUG: Showing border for split \(emptySplit.id) at \(frame.topLeftX), \(frame.topLeftY), \(frame.width)x\(frame.height)")
+         
+-        // Create a borderless window to show the border
+-        let borderWindow = NSWindow(
+-            contentRect: rect,
+-            styleMask: [.borderless],
+-            backing: .buffered,
+-            defer: false
+-        )
+-        
+-        // Configure the window
+-        borderWindow.level = NSWindow.Level.floating
+-        borderWindow.backgroundColor = NSColor.clear
+-        borderWindow.isOpaque = false
+-        borderWindow.hasShadow = false
+-        borderWindow.ignoresMouseEvents = true
+-        
+-        // Create a view for the border
+-        let borderView = BorderView(frame: NSRect(x: 0, y: 0, width: rect.width, height: rect.height))
+-        borderView.borderColor = focusedBorderColor
+-        borderView.borderWidth = borderWidth
+-        
+-        // Set the view
+-        borderWindow.contentView = borderView
+-        
+-        // Store the window and show it
+-        self.borderWindow = borderWindow
+-        borderWindow.orderFront(nil as Any?)
++        // Add simple highlight in parent view
++        if let window = NSApp.keyWindow {
++            // Create view for the border
++            let view = NSView(frame: NSRect(
++                x: frame.topLeftX, 
++                y: frame.topLeftY, 
++                width: frame.width, 
++                height: frame.height
++            ))
++            
++            // Configure the view
++            view.wantsLayer = true
++            view.layer?.backgroundColor = NSColor.clear.cgColor
++            
++            // Create border layer
++            let borderLayer = CALayer()
++            borderLayer.frame = view.bounds
++            borderLayer.borderWidth = borderWidth
++            borderLayer.borderColor = focusedBorderColor.cgColor
++            borderLayer.cornerRadius = 0
++            
++            // Add border layer to view
++            view.layer?.addSublayer(borderLayer)
++            
++            // Add view to window
++            window.contentView?.addSubview(view)
++            
++            // Store reference
++            self.borderView = view
++            
++            print("DEBUG: Border view added to window")
++        } else {
++            print("DEBUG: No key window available to add border")
++        }
+     }
+     
+     /// Hide the border
+     func hideBorder() {
+-        borderWindow?.close()
+-        borderWindow = nil
++        if let view = borderView {
++            print("DEBUG: Hiding border for split \(emptySplit.id)")
++            view.removeFromSuperview()
++            borderView = nil
++        }
+     }
+ }
+ 
+-/// A view that draws a border
+-class BorderView: NSView {
+-    /// The color of the border
+-    var borderColor: NSColor = .blue
+-    
+-    /// The width of the border
+-    var borderWidth: CGFloat = 2.0
+-    
+-    override func draw(_ dirtyRect: NSRect) {
+-        super.draw(dirtyRect)
+-        
+-        // Clear the background
+-        NSColor.clear.set()
+-        dirtyRect.fill()
+-        
+-        // Draw the border
+-        borderColor.set()
+-        
+-        let borderPath = NSBezierPath(rect: NSRect(
+-            x: borderWidth / 2,
+-            y: borderWidth / 2,
+-            width: bounds.width - borderWidth,
+-            height: bounds.height - borderWidth
+-        ))
+-        borderPath.lineWidth = borderWidth
+-        borderPath.stroke()
++/// Global storage for empty split visuals
++var emptySplitVisuals: [UUID: EmptySplitVisual] = [:]
++
++/// Get or create an EmptySplitVisual for the given EmptySplit
++func getOrCreateVisual(for emptySplit: EmptySplit) -> EmptySplitVisual {
++    guard let existingVisual = emptySplitVisuals[emptySplit.id] else {
++        let newVisual = EmptySplitVisual(emptySplit: emptySplit)
++        emptySplitVisuals[emptySplit.id] = newVisual
++        return newVisual
+     }
++    return existingVisual
+ }
+ 
+-/// Global storage for empty split visuals
+-var emptySplitVisuals: [UUID: EmptySplitVisual] = [:]
++/// Remove visual for an EmptySplit
++func removeVisual(for id: UUID) {
++    if let visual = emptySplitVisuals[id] {
++        visual.hideBorder()
++        emptySplitVisuals.removeValue(forKey: id)
++    }
++}
+-- 
+2.39.5 (Apple Git-154)
+

@@ -48,48 +48,18 @@ struct NotionSplitCommand: Command {
             index: 0
         )
         
-        // Create the second container with accordion layout
-        let secondContainer = TilingContainer(
-            parent: rootContainer,
-            adaptiveWeight: WEIGHT_AUTO,
-            orientation.opposite, // Use opposite orientation for nested containers
-            .accordion, // Use accordion layout for the container
-            index: INDEX_BIND_LAST
-        )
-        
         // If there are windows, distribute them between the containers
         if !windowsToMove.isEmpty {
-            // Move approximately half of the windows to the first container
-            let halfIndex = max(1, windowsToMove.count / 2)
-            
-            for (index, window) in windowsToMove.enumerated() {
+            for window in windowsToMove {
                 let data = window.unbindFromParent()
-                if index < halfIndex {
-                    // First half goes to the first container
-                    window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
-                } else {
-                    // Second half goes to the second container
-                    window.bind(to: secondContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
-                }
+                window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: 0)
             }
         }
-        
-        // Focus the second container
-        secondContainer.markAsMostRecentChild()
         
         // Refresh the layout
         workspace.layoutWorkspace()
         
-        // Add borders to empty containers
-        if windowsToMove.isEmpty || windowsToMove.count <= 1 {
-            if let rect = firstContainer.lastAppliedLayoutPhysicalRect, firstContainer.children.isEmpty {
-                createBorder(for: rect, color: NSColor.blue, thickness: 5.0)
-            }
-            
-            if let rect = secondContainer.lastAppliedLayoutPhysicalRect, secondContainer.children.isEmpty {
-                createBorder(for: rect, color: NSColor.orange, thickness: 5.0)
-            }
-        }
+        createEmptySplitVisual(workspace: workspace, orientation: orientation)
         
         return true
     }
@@ -104,4 +74,60 @@ struct NotionSplitCommand: Command {
     private func createBorder(for rect: Rect, color: NSColor, thickness: CGFloat) {
         BorderManager.shared.createBorder(for: rect, color: color, thickness: thickness)
     }
-} 
+
+    private func createEmptySplitVisual(workspace: Workspace, orientation: Orientation) {
+        let monitor = workspace.workspaceMonitor
+        let frame = monitor.visibleRectPaddedByOuterGaps
+        
+        // Calculate the empty split area
+        let emptyRect: Rect = frame
+        
+        // Create a dedicated overlay window for the empty split
+        let overlayWindow = NSWindow(
+            contentRect: NSRect(
+                x: emptyRect.topLeftX,
+                y: emptyRect.topLeftY - emptyRect.height,
+                width: emptyRect.width,
+                height: emptyRect.height
+            ),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        
+        // Configure the window
+        overlayWindow.title = "Empty Split"
+        overlayWindow.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.2)
+        overlayWindow.isOpaque = false
+        overlayWindow.hasShadow = false
+        overlayWindow.level = NSWindow.Level.floating // Use floating level so AeroSpace can manage it
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .participatesInCycle]
+        
+        // Create a view for the window content
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: emptyRect.width, height: emptyRect.height))
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        
+        // Add a label to the center of the view
+        let label = NSTextField(labelWithString: "Drag applications here")
+        label.alignment = .center
+        label.font = NSFont.systemFont(ofSize: 24, weight: .bold)
+        label.textColor = NSColor.white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.backgroundColor = .clear
+        
+        contentView.addSubview(label)
+        
+        // Center the labels in the view
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: 0),
+        ])
+        
+        // Set the view as the window's content view
+        overlayWindow.contentView = contentView
+        
+        // Make the window key and order it front
+        overlayWindow.makeKeyAndOrderFront(nil)
+    }
+}

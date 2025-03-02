@@ -102,6 +102,10 @@ private func restoreTreeRecursive(frozenContainer: FrozenContainer, parent: NonL
             case .container(let c):
                 // There is no reason to continue
                 if !restoreTreeRecursive(frozenContainer: c, parent: container, index: index) { return false }
+            case .emptySplit(let e):
+                // Create a new empty split in place of the frozen one
+                let emptySplit = EmptySplit(parent: container, adaptiveWeight: e.weight, index: index)
+                emptySplit.markAsMostRecentChild()
         }
     }
     return true

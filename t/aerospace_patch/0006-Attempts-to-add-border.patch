@@ -1,0 +1,710 @@
+From 4b22c3c4a1409a635b8ad07b50263f74560239ae Mon Sep 17 00:00:00 2001
+From: santhoshr <santhoshr@live.com>
+Date: Fri, 28 Feb 2025 01:25:15 +0530
+Subject: [PATCH] Attempts to add border
+
+---
+ AeroSpace.xcodeproj/project.pbxproj           |   2 +
+ Sources/AppBundle/BorderConfiguration.swift   |   0
+ .../AppBundle/BorderIntegrationManager.swift  | 164 ++++++++++++++++++
+ Sources/AppBundle/BorderOverlayManager.swift  |   0
+ Sources/AppBundle/BorderView.swift            |   0
+ Sources/AppBundle/MenuBar.swift               |   6 +
+ Sources/AppBundle/StartupManager.swift        |  24 +++
+ Sources/AppBundle/TrayMenuModel.swift         |  84 +++++++++
+ .../AppBundle/command/impl/SplitCommand.swift | 159 +++++++++++++++--
+ Sources/AppBundle/focus.swift                 |  69 +++++++-
+ Sources/AppBundle/initAppBundle.swift         |   3 +
+ 11 files changed, 498 insertions(+), 13 deletions(-)
+ create mode 100644 Sources/AppBundle/BorderConfiguration.swift
+ create mode 100644 Sources/AppBundle/BorderIntegrationManager.swift
+ create mode 100644 Sources/AppBundle/BorderOverlayManager.swift
+ create mode 100644 Sources/AppBundle/BorderView.swift
+ create mode 100644 Sources/AppBundle/StartupManager.swift
+
+diff --git a/AeroSpace.xcodeproj/project.pbxproj b/AeroSpace.xcodeproj/project.pbxproj
+index d35e2d4..0ba6826 100644
+--- a/AeroSpace.xcodeproj/project.pbxproj
++++ b/AeroSpace.xcodeproj/project.pbxproj
+@@ -20,6 +20,7 @@
+ 		84C35D8E25B61D4D1ADB1851 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+ 		8FE45A887100EB70912B07F0 /* default-config.toml */ = {isa = PBXFileReference; path = "default-config.toml"; sourceTree = "<group>"; };
+ 		CF85755BFF66B59A84F98262 /* AeroSpace.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AeroSpace.entitlements; sourceTree = "<group>"; };
++		NEW_FILE_REF_ID /* BorderOverlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BorderOverlayManager.swift; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -160,6 +161,7 @@
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				C40E0D9C06086C58955237D9 /* AeroSpaceApp.swift in Sources */,
++				NEW_BUILD_FILE_ID /* BorderOverlayManager.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+diff --git a/Sources/AppBundle/BorderConfiguration.swift b/Sources/AppBundle/BorderConfiguration.swift
+new file mode 100644
+index 0000000..e69de29
+diff --git a/Sources/AppBundle/BorderIntegrationManager.swift b/Sources/AppBundle/BorderIntegrationManager.swift
+new file mode 100644
+index 0000000..d987a06
+--- /dev/null
++++ b/Sources/AppBundle/BorderIntegrationManager.swift
+@@ -0,0 +1,164 @@
++import AppKit
++import Foundation
++import Common
++
++class BorderOverlayManager {
++    static let shared = BorderOverlayManager()
++
++    private init() {}
++
++    func setup() {
++        // Implementation for setup
++    }
++
++    func showEntireScreenBorder() {
++        // Implementation for showing entire screen border
++    }
++
++    func hideEntireScreenBorder() {
++        // Implementation for hiding entire screen border
++    }
++
++    func hideActiveSplitBorder() {
++        // Implementation for hiding active split border
++    }
++
++    func hideInactiveSplitBorders() {
++        // Implementation for hiding inactive split borders
++    }
++
++    func showActiveSplitBorder(frame: NSRect) {
++        // Implementation for showing active split border
++    }
++
++    func showInactiveSplitBorders(frames: [NSRect]) {
++        // Implementation for showing inactive split borders
++    }
++}
++
++/// A manager class that integrates border visualization with AeroSpace's window management system
++class BorderIntegrationManager {
++    static let shared = BorderIntegrationManager()
++    
++    private var isEnabled = true
++    private var fullscreenBorderVisible = false
++    
++    private init() {}
++    
++    /// Setup the border manager and integrate with AeroSpace
++    func setup() {
++        // Setup the BorderOverlayManager
++        BorderOverlayManager.shared.setup()
++        
++        // Register for focus change notifications
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(onFocusChanged),
++            name: NSNotification.Name("AeroSpaceFocusChanged"),
++            object: nil
++        )
++        
++        // Register for window split notifications
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(onWindowSplit),
++            name: NSNotification.Name("AeroSpaceWindowSplit"),
++            object: nil
++        )
++        
++        // Register for application startup completion
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(onAppStartupComplete),
++            name: NSNotification.Name("AeroSpaceStartupComplete"),
++            object: nil
++        )
++    }
++    
++    /// Called when the app startup is complete
++    @objc private func onAppStartupComplete() {
++        showFullscreenBorder()
++    }
++    
++    /// Called when focus changes between windows
++    @objc func onFocusChanged(_ notification: Notification) {
++        guard isEnabled else { return }
++        
++        // If we have active and inactive windows in a split, update their borders
++        if let userInfo = notification.userInfo,
++           let focusedWindowFrame = userInfo["focusedWindowFrame"] as? NSRect,
++           let inactiveWindowFrames = userInfo["inactiveWindowFrames"] as? [NSRect] {
++            updateBordersForSplit(focusedFrame: focusedWindowFrame, inactiveFrames: inactiveWindowFrames)
++        }
++    }
++    
++    /// Called when a window is split
++    @objc func onWindowSplit(_ notification: Notification) {
++        guard isEnabled else { return }
++        
++        if fullscreenBorderVisible {
++            hideFullscreenBorder()
++        }
++        
++        // If we have information about the split windows, show their borders
++        if let userInfo = notification.userInfo,
++           let activeFrame = userInfo["activeFrame"] as? NSRect,
++           let inactiveFrames = userInfo["inactiveFrames"] as? [NSRect] {
++            updateBordersForSplit(focusedFrame: activeFrame, inactiveFrames: inactiveFrames)
++        }
++    }
++    
++    /// Show fullscreen border around the entire screen
++    func showFullscreenBorder() {
++        guard isEnabled else { return }
++        
++        BorderOverlayManager.shared.showEntireScreenBorder()
++        fullscreenBorderVisible = true
++    }
++    
++    /// Hide fullscreen border
++    func hideFullscreenBorder() {
++        BorderOverlayManager.shared.hideEntireScreenBorder()
++        fullscreenBorderVisible = false
++    }
++    
++    /// Update borders for split windows
++    private func updateBordersForSplit(focusedFrame: NSRect, inactiveFrames: [NSRect]) {
++        // Hide any existing borders first
++        BorderOverlayManager.shared.hideActiveSplitBorder()
++        BorderOverlayManager.shared.hideInactiveSplitBorders()
++        
++        // Show new borders
++        BorderOverlayManager.shared.showActiveSplitBorder(frame: focusedFrame)
++        if !inactiveFrames.isEmpty {
++            BorderOverlayManager.shared.showInactiveSplitBorders(frames: inactiveFrames)
++        }
++    }
++    
++    /// Enable or disable border visualization
++    func setEnabled(_ enabled: Bool) {
++        isEnabled = enabled
++        
++        if !isEnabled {
++            // Hide all borders when disabled
++            BorderOverlayManager.shared.hideEntireScreenBorder()
++            BorderOverlayManager.shared.hideActiveSplitBorder()
++            BorderOverlayManager.shared.hideInactiveSplitBorders()
++        }
++    }
++    
++    /// Helper method to get frame for a window
++    func getFrameForWindow(_ window: Window) -> NSRect? {
++        guard let topLeft = window.getTopLeftCorner(),
++              let size = window.getSize() else {
++            return nil
++        }
++        
++        return NSRect(
++            x: topLeft.x,
++            y: topLeft.y,
++            width: size.width,
++            height: size.height
++        )
++    }
++}
+\ No newline at end of file
+diff --git a/Sources/AppBundle/BorderOverlayManager.swift b/Sources/AppBundle/BorderOverlayManager.swift
+new file mode 100644
+index 0000000..e69de29
+diff --git a/Sources/AppBundle/BorderView.swift b/Sources/AppBundle/BorderView.swift
+new file mode 100644
+index 0000000..e69de29
+diff --git a/Sources/AppBundle/MenuBar.swift b/Sources/AppBundle/MenuBar.swift
+index e7f0447..6877610 100644
+--- a/Sources/AppBundle/MenuBar.swift
++++ b/Sources/AppBundle/MenuBar.swift
+@@ -22,6 +22,12 @@ public func menuBar(viewModel: TrayMenuModel) -> some Scene { // todo should it
+                 }
+             }
+             Divider()
++            
++            // Add Border Visualization toggle
++            Button(viewModel.isBorderEnabled ? "Hide Borders" : "Show Borders") {
++                viewModel.toggleBorderVisibility()
++            }.keyboardShortcut("B", modifiers: .command)
++            Divider()
+         }
+         Button(viewModel.isEnabled ? "Disable" : "Enable") {
+             refreshSession(.menuBarButton, screenIsDefinitelyUnlocked: true) {
+diff --git a/Sources/AppBundle/StartupManager.swift b/Sources/AppBundle/StartupManager.swift
+new file mode 100644
+index 0000000..e3fee93
+--- /dev/null
++++ b/Sources/AppBundle/StartupManager.swift
+@@ -0,0 +1,24 @@
++import AppKit
++import Foundation
++
++/// Handles initialization of various subsystems during application startup
++class StartupManager {
++    static let shared = StartupManager()
++    
++    private init() {}
++    
++    /// Initialize border system for window management visualization
++    func initBorderSystem() {
++        // Initialize the border integration manager
++        BorderIntegrationManager.shared.setup()
++        
++        // Post notification that app startup is complete
++        // This will trigger the fullscreen border to be shown
++        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
++            NotificationCenter.default.post(
++                name: NSNotification.Name("AeroSpaceStartupComplete"),
++                object: nil
++            )
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/Sources/AppBundle/TrayMenuModel.swift b/Sources/AppBundle/TrayMenuModel.swift
+index e551ab9..075c721 100644
+--- a/Sources/AppBundle/TrayMenuModel.swift
++++ b/Sources/AppBundle/TrayMenuModel.swift
+@@ -9,7 +9,91 @@ public class TrayMenuModel: ObservableObject {
+     @Published var trayText: String = ""
+     /// Is "layouting" enabled
+     @Published var isEnabled: Bool = true
++    /// Is border visualization enabled
++    @Published var isBorderEnabled: Bool = true
+     @Published var workspaces: [WorkspaceViewModel] = []
++    
++    /// Toggle border visualization on/off
++    func toggleBorderVisibility() {
++        isBorderEnabled.toggle()
++        BorderIntegrationManager.shared.setEnabled(isBorderEnabled)
++        
++        // If borders are enabled and there's a focused window, update its border
++        if isBorderEnabled {
++            // If we have splits, show appropriate borders
++            if let focusedWindow = focus.windowOrNil, 
++               let topLeft = focusedWindow.getTopLeftCorner(),
++               let size = focusedWindow.getSize() {
++                // Get all sibling windows/splits
++                var inactiveFrames: [NSRect] = []
++                if let parent = focusedWindow.parent as? TilingContainer {
++                    for child in parent.children {
++                        if child != focusedWindow, let childWindow = child as? Window, 
++                           let childTopLeft = childWindow.getTopLeftCorner(), 
++                           let childSize = childWindow.getSize() {
++                            inactiveFrames.append(NSRect(
++                                x: childTopLeft.x,
++                                y: childTopLeft.y,
++                                width: childSize.width,
++                                height: childSize.height
++                            ))
++                        } else if child != focusedWindow, let childSplit = child as? EmptySplit, 
++                                  let childFrame = childSplit.getFrameForRendering() {
++                            inactiveFrames.append(NSRect(
++                                x: childFrame.topLeftX,
++                                y: childFrame.topLeftY,
++                                width: childFrame.width,
++                                height: childFrame.height
++                            ))
++                        }
++                    }
++                    
++                    if !inactiveFrames.isEmpty {
++                        let focusedFrame = NSRect(
++                            x: topLeft.x,
++                            y: topLeft.y,
++                            width: size.width,
++                            height: size.height
++                        )
++                        BorderIntegrationManager.shared.onFocusChanged(Notification(
++                            name: NSNotification.Name("AeroSpaceFocusChanged"),
++                            object: nil,
++                            userInfo: [
++                                "focusedWindowFrame": focusedFrame,
++                                "inactiveWindowFrames": inactiveFrames
++                            ]
++                        ))
++                    } else {
++                        // No splits yet, show fullscreen border
++                        BorderIntegrationManager.shared.showFullscreenBorder()
++                    }
++                } else {
++                    // No splits yet, show fullscreen border
++                    BorderIntegrationManager.shared.showFullscreenBorder()
++                }
++            } else if let emptySplit = focus.emptySplitOrNil, 
++                      let frame = emptySplit.getFrameForRendering() {
++                // Show border for empty split focus
++                let focusedFrame = NSRect(
++                    x: frame.topLeftX,
++                    y: frame.topLeftY,
++                    width: frame.width,
++                    height: frame.height
++                )
++                BorderIntegrationManager.shared.onFocusChanged(Notification(
++                    name: NSNotification.Name("AeroSpaceFocusChanged"),
++                    object: nil,
++                    userInfo: [
++                        "focusedWindowFrame": focusedFrame,
++                        "inactiveWindowFrames": []
++                    ]
++                ))
++            } else {
++                // No window or split focus yet, show fullscreen border
++                BorderIntegrationManager.shared.showFullscreenBorder()
++            }
++        }
++    }
+ }
+ 
+ func updateTrayText() {
+diff --git a/Sources/AppBundle/command/impl/SplitCommand.swift b/Sources/AppBundle/command/impl/SplitCommand.swift
+index 03f3dbb..63df2ae 100644
+--- a/Sources/AppBundle/command/impl/SplitCommand.swift
++++ b/Sources/AppBundle/command/impl/SplitCommand.swift
+@@ -1,4 +1,5 @@
+ import AppKit
++import Foundation
+ import Common
+ 
+ struct SplitCommand: Command {
+@@ -47,22 +48,25 @@ struct SplitCommand: Command {
+                     )
+                     window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                 }
++                
++                // After successful split, send notification with frame information
++                sendSplitNotification(window: window)
++                
+                 return true
+             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
+                 return io.err("Can't split macos fullscreen, minimized windows and windows of hidden apps. This behavior may change in the future")
+             case .macosPopupWindowsContainer:
+-                return false // Impossible
++                return io.err("Can't split macos popup windows")
+         }
+     }
+     
+-    /// Create an empty split in the workspace or within an existing split
++    /// Create empty split in place of the current focus
+     private func createEmptySplit(_ target: LiveFocus, _ io: CmdIo) -> Bool {
+-        // If there's already a window focused, split it
+         if let window = target.windowOrNil {
++            // Create an empty split based on the current window's layout
+             switch window.parent.cases {
+                 case .workspace:
+-                    // Nothing to do for floating and macOS native fullscreen windows
+-                    return io.err("Can't split floating windows")
++                    return io.err("Can't split floating windows with empty splits")
+                 case .tilingContainer(let parent):
+                     let orientation: Orientation = switch args.arg.val {
+                         case .vertical: .v
+@@ -71,8 +75,12 @@ struct SplitCommand: Command {
+                     }
+                     if parent.children.count == 1 {
+                         parent.changeOrientation(orientation)
+-                        // Add an empty split next to the window
+-                        parent.createEmptySplit()
++                        
++                        // Create empty split in the same parent
++                        let emptySplit = parent.createEmptySplit()
++                        
++                        // Send notification about the split
++                        sendSplitNotification(window: window, emptySplit: emptySplit)
+                     } else {
+                         let data = window.unbindFromParent()
+                         let newParent = TilingContainer(
+@@ -85,7 +93,10 @@ struct SplitCommand: Command {
+                         window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                         
+                         // Create an empty split alongside the window
+-                        newParent.createEmptySplit()
++                        let emptySplit = newParent.createEmptySplit()
++                        
++                        // Send notification about the split
++                        sendSplitNotification(window: window, emptySplit: emptySplit)
+                     }
+                     return true
+                 case .macosMinimizedWindowsContainer:
+@@ -114,15 +125,24 @@ struct SplitCommand: Command {
+                 rootContainer.changeOrientation(orientation)
+             } else if rootContainer.children.isEmpty {
+                 // Create the first empty split
+-                workspace.createEmptySplit()
++                let emptySplit = workspace.createEmptySplit()
++                
++                // Send notification for the first empty split
++                sendEmptySplitNotification(emptySplit: emptySplit)
+             } else {
+                 // Create additional splits with correct orientation
+                 if rootContainer.orientation != orientation {
+                     // Create a container with correct orientation
+-                    rootContainer.createContainerWithEmptySplit(orientation: orientation)
++                    let emptySplit = rootContainer.createContainerWithEmptySplit(orientation: orientation)
++                    
++                    // Send notification for the new empty split
++                    sendEmptySplitNotification(emptySplit: emptySplit)
+                 } else {
+                     // Just add an empty split
+-                    rootContainer.createEmptySplit()
++                    let emptySplit = rootContainer.createEmptySplit()
++                    
++                    // Send notification for the new empty split
++                    sendEmptySplitNotification(emptySplit: emptySplit)
+                 }
+             }
+             
+@@ -155,7 +175,10 @@ struct SplitCommand: Command {
+                     emptySplit.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                     
+                     // Create another empty split in the same container
+-                    newParent.createEmptySplit()
++                    let newEmptySplit = newParent.createEmptySplit()
++                    
++                    // Send notification about the split
++                    sendSplitNotificationForEmptySplits(emptySplit1: emptySplit, emptySplit2: newEmptySplit)
+                 }
+                 return true
+             case .macosMinimizedWindowsContainer:
+@@ -168,4 +191,116 @@ struct SplitCommand: Command {
+                 return io.err("Can't split hidden app empty splits")
+         }
+     }
++    
++    /// Send notification about window split with frames
++    private func sendSplitNotification(window: Window, emptySplit: EmptySplit? = nil) {
++        // Get window frame using topLeft and size
++        guard let topLeft = window.getTopLeftCorner(), 
++              let size = window.getSize() else { return }
++        
++        // Convert to NSRect
++        let activeFrame = NSRect(
++            x: topLeft.x,
++            y: topLeft.y,
++            width: size.width,
++            height: size.height
++        )
++        
++        var inactiveFrames: [NSRect] = []
++        
++        // If we have an empty split, add it to inactive frames
++        if let emptySplit = emptySplit, let splitFrame = emptySplit.getFrameForRendering() {
++            inactiveFrames.append(NSRect(
++                x: splitFrame.topLeftX,
++                y: splitFrame.topLeftY,
++                width: splitFrame.width,
++                height: splitFrame.height
++            ))
++        } else {
++            // Otherwise gather all sibling windows
++            if let parent = window.parent as? TilingContainer {
++                for child in parent.children {
++                    if child != window, let childWindow = child as? Window, 
++                       let childTopLeft = childWindow.getTopLeftCorner(), 
++                       let childSize = childWindow.getSize() {
++                        inactiveFrames.append(NSRect(
++                            x: childTopLeft.x,
++                            y: childTopLeft.y,
++                            width: childSize.width,
++                            height: childSize.height
++                        ))
++                    } else if child != window, let childSplit = child as? EmptySplit, let frame = childSplit.getFrameForRendering() {
++                        inactiveFrames.append(NSRect(
++                            x: frame.topLeftX,
++                            y: frame.topLeftY,
++                            width: frame.width,
++                            height: frame.height
++                        ))
++                    }
++                }
++            }
++        }
++        
++        // Post the notification
++        NotificationCenter.default.post(
++            name: NSNotification.Name("AeroSpaceWindowSplit"),
++            object: nil,
++            userInfo: [
++                "activeFrame": activeFrame,
++                "inactiveFrames": inactiveFrames
++            ]
++        )
++    }
++    
++    /// Send notification for empty split creation
++    private func sendEmptySplitNotification(emptySplit: EmptySplit) {
++        guard let frame = emptySplit.getFrameForRendering() else { return }
++        
++        let activeFrame = NSRect(
++            x: frame.topLeftX,
++            y: frame.topLeftY,
++            width: frame.width,
++            height: frame.height
++        )
++        
++        // Post the notification
++        NotificationCenter.default.post(
++            name: NSNotification.Name("AeroSpaceWindowSplit"),
++            object: nil,
++            userInfo: [
++                "activeFrame": activeFrame,
++                "inactiveFrames": [] as [NSRect]
++            ]
++        )
++    }
++    
++    /// Send notification for split between two empty splits
++    private func sendSplitNotificationForEmptySplits(emptySplit1: EmptySplit, emptySplit2: EmptySplit) {
++        guard let frame1 = emptySplit1.getFrameForRendering() else { return }
++        guard let frame2 = emptySplit2.getFrameForRendering() else { return }
++        
++        let activeFrame = NSRect(
++            x: frame1.topLeftX,
++            y: frame1.topLeftY,
++            width: frame1.width,
++            height: frame1.height
++        )
++        
++        let inactiveFrame = NSRect(
++            x: frame2.topLeftX,
++            y: frame2.topLeftY,
++            width: frame2.width,
++            height: frame2.height
++        )
++        
++        // Post the notification
++        NotificationCenter.default.post(
++            name: NSNotification.Name("AeroSpaceWindowSplit"),
++            object: nil,
++            userInfo: [
++                "activeFrame": activeFrame,
++                "inactiveFrames": [inactiveFrame]
++            ]
++        )
++    }
+ }
+diff --git a/Sources/AppBundle/focus.swift b/Sources/AppBundle/focus.swift
+index 4c3a154..6b7f773 100644
+--- a/Sources/AppBundle/focus.swift
++++ b/Sources/AppBundle/focus.swift
+@@ -93,7 +93,7 @@ var _focus: FrozenFocus = {
+ var focus: LiveFocus { _focus.live }
+ 
+ func setFocus(to newFocus: LiveFocus) -> Bool {
+-    if _focus == newFocus.frozen { return true }
++    if (_focus == newFocus.frozen) { return true }
+     let oldFocus = focus
+     // Normalize mruWindow when focus away from a workspace
+     if oldFocus.workspace != newFocus.workspace {
+@@ -104,6 +104,7 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
+     if let oldEmptySplit = oldFocus.emptySplitOrNil, 
+        let visual = emptySplitVisuals[oldEmptySplit.id] {
+         visual.hideBorder()
++        BorderOverlayManager.shared.hideActiveSplitBorder() // Changed from BorderIntegrationManager to BorderOverlayManager
+     }
+ 
+     _focus = newFocus.frozen
+@@ -111,8 +112,29 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
+ 
+     newFocus.windowOrNil?.markAsMostRecentChild()
+     newFocus.updateEmptySplitVisual()
++    
++    // Show border for the newly focused empty split
++    if let newEmptySplit = newFocus.emptySplitOrNil,
++       let visual = emptySplitVisuals[newEmptySplit.id] {
++        visual.showBorder()
++        if let frame = newEmptySplit.getFrameForRendering()?.nsRect {
++            BorderOverlayManager.shared.showActiveSplitBorder(frame: frame)
++        }
++    }
++    
++    // Send notification after focus has changed
++    sendFocusChangeNotification(oldFocus: oldFocus, newFocus: newFocus)
++    
+     return status
+ }
++
++// Convert Rect to NSRect
++extension Rect {
++    var nsRect: NSRect {
++        return NSRect(x: self.topLeftX, y: self.topLeftY, width: self.width, height: self.height)
++    }
++}
++
+ extension Window {
+     func focusWindow() -> Bool {
+         if let focus = toLiveFocusOrNil() {
+@@ -213,3 +235,48 @@ private func onWorkspaceChanged(_ oldWorkspace: String, _ newWorkspace: String)
+         Result { try process.run() }.getOrThrow() // todo It's not perfect to fail here
+     }
+ }
++
++// Sends notification about focus change with relevant frames
++private func sendFocusChangeNotification(oldFocus: LiveFocus, newFocus: LiveFocus) {
++    // Get the current workspace
++    let workspace = newFocus.workspace
++    
++    // Collect the frames for focused and unfocused windows/splits
++    var focusedFrame: NSRect?
++    var inactiveFrames: [NSRect] = []
++    
++    // Get focused window/split frame
++    if let window = newFocus.windowOrNil {
++        if let topLeft = window.getTopLeftCorner(), let size = window.getSize() {
++            focusedFrame = NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height)
++        }
++    } else if let emptySplit = newFocus.emptySplitOrNil, let rect = emptySplit.getFrameForRendering() {
++        focusedFrame = NSRect(x: rect.topLeftX, y: rect.topLeftY, width: rect.width, height: rect.height)
++    }
++    
++    // Get inactive window frames in the same workspace
++    for window in workspace.allLeafWindowsRecursive {
++        if window != newFocus.windowOrNil, let topLeft = window.getTopLeftCorner(), let size = window.getSize() {
++            inactiveFrames.append(NSRect(x: topLeft.x, y: topLeft.y, width: size.width, height: size.height))
++        }
++    }
++    
++    // Get inactive empty split frames
++    for emptySplit in workspace.allEmptySplitsRecursive {
++        if emptySplit != newFocus.emptySplitOrNil, let rect = emptySplit.getFrameForRendering() {
++            inactiveFrames.append(NSRect(x: rect.topLeftX, y: rect.topLeftY, width: rect.width, height: rect.height))
++        }
++    }
++    
++    // Only send notification if we have valid frames
++    if let focusedFrameRect = focusedFrame {
++        NotificationCenter.default.post(
++            name: NSNotification.Name("AeroSpaceFocusChanged"),
++            object: nil,
++            userInfo: [
++                "focusedWindowFrame": focusedFrameRect,
++                "inactiveWindowFrames": inactiveFrames
++            ]
++        )
++    }
++}
+diff --git a/Sources/AppBundle/initAppBundle.swift b/Sources/AppBundle/initAppBundle.swift
+index 87f0b6e..3915f13 100644
+--- a/Sources/AppBundle/initAppBundle.swift
++++ b/Sources/AppBundle/initAppBundle.swift
+@@ -31,6 +31,9 @@ public func initAppBundle() {
+             _ = config.afterLoginCommand.runCmdSeq(.defaultEnv, .emptyStdin)
+         }
+         _ = config.afterStartupCommand.runCmdSeq(.defaultEnv, .emptyStdin)
++        
++        // Initialize the border system after startup is complete
++        StartupManager.shared.initBorderSystem()
+     }
+ }
+ 
+-- 
+2.39.5 (Apple Git-154)
+

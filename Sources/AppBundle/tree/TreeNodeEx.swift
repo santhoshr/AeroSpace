@@ -39,7 +39,9 @@ extension TreeNode {
             case .tilingContainer: parent?.nodeMonitor
             case .macosFullscreenWindowsContainer: parent?.nodeMonitor
             case .macosHiddenAppsWindowsContainer: parent?.nodeMonitor
-            case .macosMinimizedWindowsContainer, .macosPopupWindowsContainer: nil
+            case .macosMinimizedWindowsContainer: parent?.nodeMonitor
+            case .macosPopupWindowsContainer: parent?.nodeMonitor
+            case .emptySplit: parent?.nodeMonitor
         }
     }
 

@@ -1,13 +1,21 @@
 import AppKit
+import Foundation
 import Common
 
 enum EffectiveLeaf {
     case window(Window)
+    case emptySplit(EmptySplit)
     case emptyWorkspace(Workspace)
 }
 extension LiveFocus {
     var asLeaf: EffectiveLeaf {
-        if let windowOrNil { .window(windowOrNil) } else { .emptyWorkspace(workspace) }
+        if let windowOrNil {
+            return .window(windowOrNil) 
+        } else if let emptySplit = workspace.firstEmptySplitRecursive {
+            return .emptySplit(emptySplit)
+        } else { 
+            return .emptyWorkspace(workspace) 
+        }
     }
 }
 
@@ -15,14 +23,31 @@ extension LiveFocus {
 /// Alternative name: ResolvedFocus
 struct LiveFocus: AeroAny, Equatable {
     let windowOrNil: Window?
+    let emptySplitOrNil: EmptySplit?
     var workspace: Workspace
+    
+    init(windowOrNil: Window?, emptySplitOrNil: EmptySplit? = nil, workspace: Workspace) {
+        self.windowOrNil = windowOrNil
+        self.emptySplitOrNil = emptySplitOrNil
+        self.workspace = workspace
+    }
 
     var frozen: FrozenFocus {
         return FrozenFocus(
             windowId: windowOrNil?.windowId,
+            emptySplitId: emptySplitOrNil?.id,
             workspaceName: workspace.name,
             monitorId: workspace.workspaceMonitor.monitorId ?? 0
         )
+    }
+    
+    /// Returns whether there is an actual leaf node (window or empty split) focused
+    var hasLeafFocus: Bool {
+        return windowOrNil != nil || emptySplitOrNil != nil
+    }
+    
+    func updateEmptySplitVisual() {
+        emptySplitOrNil?.updateVisual()
     }
 }
 
@@ -32,6 +57,7 @@ struct LiveFocus: AeroAny, Equatable {
 /// window - workspace - monitor relation could change since the object is created
 struct FrozenFocus: AeroAny, Equatable {
     let windowId: UInt32?
+    let emptySplitId: UUID?
     let workspaceName: String
     // monitorId is not part of the focus. We keep it here only for 'on-monitor-changed' to work
     let monitorId: Int // 0-based
@@ -39,19 +65,25 @@ struct FrozenFocus: AeroAny, Equatable {
     var live: LiveFocus { // Important: don't access focus.monitorId here. monitorId is not part of the focus. Always prefer workspace
         let window: Window? = windowId.flatMap { Window.get(byId: $0) }
         let workspace = Workspace.get(byName: workspaceName)
+        // Find empty split by UUID if we have one
+        let emptySplit: EmptySplit? = emptySplitId.flatMap { id in
+            workspace.allEmptySplitsRecursive.first { $0.id == id }
+        }
 
         let wsFocus = workspace.toLiveFocus()
-        let wdFocus = window?.toLiveFocusOrNil() ?? wsFocus
+        let leafFocus = window?.toLiveFocusOrNil() 
+            ?? emptySplit?.toLiveFocusOrNil() 
+            ?? wsFocus
 
-        return wsFocus.workspace != wdFocus.workspace
-            ? wsFocus // If window and workspace become separated prefer workspace
-            : wdFocus
+        return wsFocus.workspace != leafFocus.workspace
+            ? wsFocus // If window/emptySplit and workspace become separated prefer workspace
+            : leafFocus
     }
 }
 
 var _focus: FrozenFocus = {
     let monitor = mainMonitor
-    return FrozenFocus(windowId: nil, workspaceName: monitor.activeWorkspace.name, monitorId: monitor.monitorId ?? 0)
+    return FrozenFocus(windowId: nil, emptySplitId: nil, workspaceName: monitor.activeWorkspace.name, monitorId: monitor.monitorId ?? 0)
 }()
 
 /// Global focus.
@@ -67,11 +99,18 @@ func setFocus(to newFocus: LiveFocus) -> Bool {
     if oldFocus.workspace != newFocus.workspace {
         oldFocus.windowOrNil?.markAsMostRecentChild()
     }
+    
+    // Hide old empty split borders
+    if let oldEmptySplit = oldFocus.emptySplitOrNil, 
+       let visual = emptySplitVisuals[oldEmptySplit.id] {
+        visual.hideBorder()
+    }
 
     _focus = newFocus.frozen
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
     newFocus.windowOrNil?.markAsMostRecentChild()
+    newFocus.updateEmptySplitVisual()
     return status
 }
 extension Window {
@@ -95,6 +134,8 @@ extension Workspace {
         //      while floating or macos unconventional windows might be presented
         if let wd = mostRecentWindowRecursive ?? anyLeafWindowRecursive {
             LiveFocus(windowOrNil: wd, workspace: self)
+        } else if let emptySplit = firstEmptySplitRecursive {
+            LiveFocus(windowOrNil: nil, emptySplitOrNil: emptySplit, workspace: self)
         } else {
             LiveFocus(windowOrNil: nil, workspace: self) // emptyWorkspace
         }

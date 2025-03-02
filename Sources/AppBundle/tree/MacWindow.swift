@@ -365,6 +365,52 @@ extension Window {
 
 // The function is private because it's "unsafe". It requires the window to be in unbound state
 private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Workspace, _ app: MacApp) -> BindingData {
+    // First determine if this is a utility, menu, or launcher app that should remain floating
+    // and never be put into empty splits
+    if isUtilityOrMenuApp(app, axWindow) {
+        print("DEBUG: Detected utility/launcher app - keeping as floating window")
+        return BindingData(parent: workspace, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
+    }
+    
+    // Top priority: Always check for empty splits first, regardless of window type
+    // This ensures even dialog windows can be placed in empty splits if available
+    
+    // First, check if there's a focused empty split in the workspace
+    if let focusedEmptySplit = focus.emptySplitOrNil, 
+       focusedEmptySplit.mostRecentWorkspaceParent == workspace {
+        print("DEBUG: Using focused empty split for new window")
+        // Get the parent of the empty split
+        let parent = focusedEmptySplit.parent
+        let ownIndex = focusedEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        focusedEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // Second, check if there are any empty splits in the workspace
+    if let firstEmptySplit = workspace.firstEmptySplitRecursive {
+        print("DEBUG: Using available empty split for new window")
+        // Get the parent of the empty split
+        let parent = firstEmptySplit.parent
+        let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        firstEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no empty splits are available, fall back to original logic
     if !isWindow(axWindow, app) {
         return BindingData(parent: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
     }
@@ -374,8 +420,78 @@ private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Wo
     return getBindingDataForNewTilingWindow(workspace)
 }
 
+/// Determine if an app is a utility, menu, or launcher app that should remain floating
+/// and never be placed in empty splits
+private func isUtilityOrMenuApp(_ app: MacApp, _ axWindow: AXUIElement) -> Bool {
+    // List of common utility app bundle IDs
+    let utilityApps = [
+        "at.obdev.LaunchBar",           // LaunchBar
+        "com.extendmac.Keyboard-Pilot", // Keyboard Pilot
+        "com.raycast.macos",            // Raycast
+        "com.manytricks.Moom",          // Moom
+        "com.knollsoft.Rectangle",      // Rectangle
+        "com.runningwithcrayons.Alfred", // Alfred
+        "com.bjango.istatmenus.status", // iStat Menus
+        "io.element.menubar",           // Element Chat
+        "com.apple.systemuiserver",     // System UI Server (menu extras)
+        "org.hammerspoon.Hammerspoon",  // Hammerspoon
+        "com.agilebits.onepassword7",   // 1Password
+        "com.culturedcode.ThingsMac",   // Things
+        "com.tinyspeck.slackmacgap",    // Slack
+        "com.whatsapp.WhatsApp"         // WhatsApp
+    ]
+    
+    // Return true if the app is in our utility app list
+    if let appId = app.id, utilityApps.contains(appId) {
+        return true
+    }
+    
+    // Check for utility window role/subrole
+    let role = axWindow.get(Ax.roleAttr)
+    let subrole = axWindow.get(Ax.subroleAttr)
+    
+    return role == "AXSystemFloatingWindow" || 
+           subrole == "AXSystemDialog" ||
+           subrole == "AXUtilityWindow" ||
+           subrole == "AXStatusItem"
+}
+
 // The function is private because it's "unsafe". It requires the window to be in unbound state
 private func getBindingDataForNewTilingWindow(_ workspace: Workspace) -> BindingData {
+    // First, check if there's a focused empty split in the workspace
+    if let focusedEmptySplit = focus.emptySplitOrNil, 
+       focusedEmptySplit.mostRecentWorkspaceParent == workspace {
+        // Get the parent of the empty split
+        let parent = focusedEmptySplit.parent
+        let ownIndex = focusedEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        focusedEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no focused empty split, check if there are any empty splits in the workspace
+    if let firstEmptySplit = workspace.firstEmptySplitRecursive {
+        // Get the parent of the empty split
+        let parent = firstEmptySplit.parent
+        let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0
+        
+        // Remove the empty split to replace it with the window
+        firstEmptySplit.unbindFromParent()
+        
+        return BindingData(
+            parent: parent,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: ownIndex
+        )
+    }
+    
+    // If no empty splits exist, fall back to standard behavior
     let mruWindow = workspace.mostRecentWindowRecursive
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
         return BindingData(

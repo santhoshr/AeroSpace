@@ -1,0 +1,594 @@
+From 0446ba49ffdc1f8345e772603b54180d58916b07 Mon Sep 17 00:00:00 2001
+From: santhoshr <santhoshr@live.com>
+Date: Thu, 27 Feb 2025 22:26:54 +0530
+Subject: [PATCH] feat: implement manual tiling with empty splits
+
+This commit adds support for Notion/Ion-style manual tiling to AeroSpace.
+Key features:
+
+- Add EmptySplit class to represent empty tiling areas
+- Enable empty split creation with '--empty' flag in split command
+- Support automatic window placement in empty splits
+- Integrate empty splits with focus navigation
+- Update window binding logic to prioritize using empty splits
+
+Empty splits allow users to pre-arrange their workspace layout before
+opening applications, which enables a more flexible workflow similar to
+Notion or ion window managers.
+---
+ Sources/AppBundle/command/CmdEnv.swift        |   1 +
+ .../AppBundle/command/impl/FocusCommand.swift |  45 ++++--
+ .../AppBundle/command/impl/SplitCommand.swift |  90 ++++++++++++
+ Sources/AppBundle/focus.swift                 |  41 +++++-
+ Sources/AppBundle/tree/EmptySplit.swift       | 129 ++++++++++++++++++
+ Sources/AppBundle/tree/MacWindow.swift        |  34 +++++
+ Sources/AppBundle/tree/TreeNode.swift         |  30 ++++
+ .../Common/cmdArgs/impl/SplitCmdArgs.swift    |   5 +-
+ 8 files changed, 357 insertions(+), 18 deletions(-)
+ create mode 100644 Sources/AppBundle/tree/EmptySplit.swift
+
+diff --git a/Sources/AppBundle/command/CmdEnv.swift b/Sources/AppBundle/command/CmdEnv.swift
+index e6d471c..cc1894a 100644
+--- a/Sources/AppBundle/command/CmdEnv.swift
++++ b/Sources/AppBundle/command/CmdEnv.swift
+@@ -19,6 +19,7 @@ struct CmdEnv: Copyable { // todo forward env from cli to server
+     func withFocus(_ focus: LiveFocus) -> CmdEnv {
+         switch focus.asLeaf {
+             case .window(let wd): .defaultEnv.copy(\.windowId, wd.windowId)
++            case .emptySplit(let es): .defaultEnv.copy(\.workspaceName, es.mostRecentWorkspaceParent.name)
+             case .emptyWorkspace(let ws): .defaultEnv.copy(\.workspaceName, ws.name)
+         }
+     }
+diff --git a/Sources/AppBundle/command/impl/FocusCommand.swift b/Sources/AppBundle/command/impl/FocusCommand.swift
+index 58713c5..8d7b415 100644
+--- a/Sources/AppBundle/command/impl/FocusCommand.swift
++++ b/Sources/AppBundle/command/impl/FocusCommand.swift
+@@ -17,14 +17,36 @@ struct FocusCommand: Command {
+ 
+         switch args.target {
+             case .direction(let direction):
++                // Handle window focus
+                 let window = target.windowOrNil
+-                if let (parent, ownIndex) = window?.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
+-                    guard let windowToFocus = parent.children[ownIndex + direction.focusOffset]
+-                        .findFocusTargetRecursive(snappedTo: direction.opposite) else { return false }
+-                    return windowToFocus.focusWindow()
+-                } else {
++                let emptySplit = target.emptySplitOrNil
++                
++                // If we have a focused window, use it for navigation
++                if let window = window {
++                    if let (parent, ownIndex) = window.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
++                        guard let windowToFocus = (parent.children[ownIndex + direction.focusOffset] as TreeNode)
++                            .findFocusWindowRecursive(snappedTo: direction.opposite) else { return false }
++                        
++                        return windowToFocus.focusWindow()
++                    } else {
++                        return hitWorkspaceBoundaries(target, io, args, direction)
++                    }
++                }
++                // If we have a focused empty split, use it for navigation
++                else if let emptySplit = emptySplit {
++                    if let (parent, ownIndex) = emptySplit.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
++                        guard let windowToFocus = (parent.children[ownIndex + direction.focusOffset] as TreeNode)
++                            .findFocusWindowRecursive(snappedTo: direction.opposite) else { return false }
++                        
++                        return windowToFocus.focusWindow()
++                    } else {
++                        return hitWorkspaceBoundaries(target, io, args, direction)
++                    }
++                }
++                else {
+                     return hitWorkspaceBoundaries(target, io, args, direction)
+                 }
++                
+             case .windowId(let windowId):
+                 if let windowToFocus = Window.get(byId: windowId) {
+                     return windowToFocus.focusWindow()
+@@ -82,15 +104,16 @@ private func hitAllMonitorsOuterFrameBoundaries(
+         case .wrapAroundTheWorkspace:
+             return wrapAroundTheWorkspace(target, io, direction)
+         case .wrapAroundAllMonitors:
+-            wrappedMonitor.activeWorkspace.findFocusTargetRecursive(snappedTo: direction.opposite)?.markAsMostRecentChild()
++            wrappedMonitor.activeWorkspace.findFocusWindowRecursive(snappedTo: direction.opposite)?.markAsMostRecentChild()
+             return wrappedMonitor.activeWorkspace.focusWorkspace()
+     }
+ }
+ 
+ private func wrapAroundTheWorkspace(_ target: LiveFocus, _ io: CmdIo, _ direction: CardinalDirection) -> Bool {
+-    guard let windowToFocus = target.workspace.findFocusTargetRecursive(snappedTo: direction.opposite) else {
++    guard let windowToFocus = (target.workspace as TreeNode).findFocusWindowRecursive(snappedTo: direction.opposite) else {
+         return io.err(noWindowIsFocused)
+     }
++    
+     return windowToFocus.focusWindow()
+ }
+ 
+@@ -143,18 +166,18 @@ private struct FloatingWindowData {
+ }
+ 
+ private extension TreeNode {
+-    func findFocusTargetRecursive(snappedTo direction: CardinalDirection) -> Window? {
++    func findFocusWindowRecursive(snappedTo direction: CardinalDirection) -> Window? {
+         switch nodeCases {
+             case .workspace(let workspace):
+-                return workspace.rootTilingContainer.findFocusTargetRecursive(snappedTo: direction)
++                return workspace.rootTilingContainer.findFocusWindowRecursive(snappedTo: direction)
+             case .window(let window):
+                 return window
+             case .tilingContainer(let container):
+                 if direction.orientation == container.orientation {
+                     return (direction.isPositive ? container.children.last : container.children.first)?
+-                        .findFocusTargetRecursive(snappedTo: direction)
++                        .findFocusWindowRecursive(snappedTo: direction)
+                 } else {
+-                    return mostRecentChild?.findFocusTargetRecursive(snappedTo: direction)
++                    return mostRecentChild?.findFocusWindowRecursive(snappedTo: direction)
+                 }
+             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
+                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
+diff --git a/Sources/AppBundle/command/impl/SplitCommand.swift b/Sources/AppBundle/command/impl/SplitCommand.swift
+index 9ae1e72..4bc1041 100644
+--- a/Sources/AppBundle/command/impl/SplitCommand.swift
++++ b/Sources/AppBundle/command/impl/SplitCommand.swift
+@@ -10,7 +10,18 @@ struct SplitCommand: Command {
+             return io.err("'split' has no effect when 'enable-normalization-flatten-containers' normalization enabled. My recommendation: keep the normalizations enabled, and prefer 'join-with' over 'split'.")
+         }
+         guard let target = args.resolveTargetOrReportError(env, io) else { return false }
++        
++        // Handle the empty split creation case
++        if args.createEmpty {
++            return createEmptySplit(target, io)
++        }
++        
+         guard let window = target.windowOrNil else {
++            // If no window is focused, but we have an empty split, treat the empty split 
++            // as a window for splitting purposes
++            if let emptySplit = target.workspace.firstEmptySplitRecursive {
++                return splitEmptySplit(emptySplit, io)
++            }
+             return io.err(noWindowIsFocused)
+         }
+         switch window.parent.cases {
+@@ -35,6 +46,11 @@ struct SplitCommand: Command {
+                         index: data.index
+                     )
+                     window.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
++                    
++                    // If --empty flag is set, create an empty split alongside the window
++                    if args.createEmpty {
++                        newParent.createEmptySplit()
++                    }
+                 }
+                 return true
+             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
+@@ -43,4 +59,78 @@ struct SplitCommand: Command {
+                 return false // Impossible
+         }
+     }
++    
++    /// Create an empty split in the workspace or within an existing split
++    private func createEmptySplit(_ target: LiveFocus, _ io: CmdIo) -> Bool {
++        // If there's already a window focused, split it
++        if target.windowOrNil != nil {
++            // The window case is handled in the main run method
++            return false
++        } else {
++            // If workspace is empty, create an empty split in the root container
++            let orientation: Orientation = switch args.arg.val {
++                case .vertical: .v
++                case .horizontal: .h
++                case .opposite: .h // Default to horizontal for empty workspace
++            }
++            
++            // Create an empty split in the root container with the specified orientation
++            let workspace = target.workspace
++            let rootContainer = workspace.rootTilingContainer
++            
++            // If root container already has an empty split, change its orientation
++            if rootContainer.children.count == 1 && rootContainer.children[0].isEmptySplit {
++                rootContainer.changeOrientation(orientation)
++            } else if rootContainer.children.isEmpty {
++                // Create the first empty split
++                workspace.createEmptySplit()
++            } else {
++                // Create additional splits with correct orientation
++                if rootContainer.orientation != orientation {
++                    // Create a container with correct orientation
++                    rootContainer.createContainerWithEmptySplit(orientation: orientation)
++                } else {
++                    // Just add an empty split
++                    rootContainer.createEmptySplit()
++                }
++            }
++            
++            return true
++        }
++    }
++    
++    /// Split an existing empty split
++    private func splitEmptySplit(_ emptySplit: EmptySplit, _ io: CmdIo) -> Bool {
++        switch emptySplit.parent.cases {
++            case .workspace:
++                return io.err("Can't split floating empty splits")
++            case .tilingContainer(let parent):
++                let orientation: Orientation = switch args.arg.val {
++                    case .vertical: .v
++                    case .horizontal: .h
++                    case .opposite: parent.orientation.opposite
++                }
++                if parent.children.count == 1 {
++                    parent.changeOrientation(orientation)
++                } else {
++                    let data = emptySplit.unbindFromParent()
++                    let newParent = TilingContainer(
++                        parent: parent,
++                        adaptiveWeight: data.adaptiveWeight,
++                        orientation,
++                        .tiles,
++                        index: data.index
++                    )
++                    emptySplit.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
++                    
++                    // Create another empty split in the same container
++                    newParent.createEmptySplit()
++                }
++                return true
++            case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
++                return io.err("Can't split macOS fullscreen, minimized empty splits. This behavior may change in the future")
++            case .macosPopupWindowsContainer:
++                return false // Impossible
++        }
++    }
+ }
+diff --git a/Sources/AppBundle/focus.swift b/Sources/AppBundle/focus.swift
+index a5216a0..22eeef7 100644
+--- a/Sources/AppBundle/focus.swift
++++ b/Sources/AppBundle/focus.swift
+@@ -3,11 +3,18 @@ import Common
+ 
+ enum EffectiveLeaf {
+     case window(Window)
++    case emptySplit(EmptySplit)
+     case emptyWorkspace(Workspace)
+ }
+ extension LiveFocus {
+     var asLeaf: EffectiveLeaf {
+-        if let windowOrNil { .window(windowOrNil) } else { .emptyWorkspace(workspace) }
++        if let windowOrNil {
++            return .window(windowOrNil) 
++        } else if let emptySplit = workspace.firstEmptySplitRecursive {
++            return .emptySplit(emptySplit)
++        } else { 
++            return .emptyWorkspace(workspace) 
++        }
+     }
+ }
+ 
+@@ -15,15 +22,28 @@ extension LiveFocus {
+ /// Alternative name: ResolvedFocus
+ struct LiveFocus: AeroAny, Equatable {
+     let windowOrNil: Window?
++    let emptySplitOrNil: EmptySplit?
+     var workspace: Workspace
++    
++    init(windowOrNil: Window?, emptySplitOrNil: EmptySplit? = nil, workspace: Workspace) {
++        self.windowOrNil = windowOrNil
++        self.emptySplitOrNil = emptySplitOrNil
++        self.workspace = workspace
++    }
+ 
+     var frozen: FrozenFocus {
+         return FrozenFocus(
+             windowId: windowOrNil?.windowId,
++            emptySplitId: emptySplitOrNil?.id,
+             workspaceName: workspace.name,
+             monitorId: workspace.workspaceMonitor.monitorId ?? 0
+         )
+     }
++    
++    /// Returns whether there is an actual leaf node (window or empty split) focused
++    var hasLeafFocus: Bool {
++        return windowOrNil != nil || emptySplitOrNil != nil
++    }
+ }
+ 
+ /// "old", "captured", "frozen in time" Focus
+@@ -32,6 +52,7 @@ struct LiveFocus: AeroAny, Equatable {
+ /// window - workspace - monitor relation could change since the object is created
+ struct FrozenFocus: AeroAny, Equatable {
+     let windowId: UInt32?
++    let emptySplitId: UUID?
+     let workspaceName: String
+     // monitorId is not part of the focus. We keep it here only for 'on-monitor-changed' to work
+     let monitorId: Int // 0-based
+@@ -39,19 +60,25 @@ struct FrozenFocus: AeroAny, Equatable {
+     var live: LiveFocus { // Important: don't access focus.monitorId here. monitorId is not part of the focus. Always prefer workspace
+         let window: Window? = windowId.flatMap { Window.get(byId: $0) }
+         let workspace = Workspace.get(byName: workspaceName)
++        // Find empty split by UUID if we have one
++        let emptySplit: EmptySplit? = emptySplitId.flatMap { id in
++            workspace.allEmptySplitsRecursive.first { $0.id == id }
++        }
+ 
+         let wsFocus = workspace.toLiveFocus()
+-        let wdFocus = window?.toLiveFocusOrNil() ?? wsFocus
++        let leafFocus = window?.toLiveFocusOrNil() 
++            ?? emptySplit?.toLiveFocusOrNil() 
++            ?? wsFocus
+ 
+-        return wsFocus.workspace != wdFocus.workspace
+-            ? wsFocus // If window and workspace become separated prefer workspace
+-            : wdFocus
++        return wsFocus.workspace != leafFocus.workspace
++            ? wsFocus // If window/emptySplit and workspace become separated prefer workspace
++            : leafFocus
+     }
+ }
+ 
+ var _focus: FrozenFocus = {
+     let monitor = mainMonitor
+-    return FrozenFocus(windowId: nil, workspaceName: monitor.activeWorkspace.name, monitorId: monitor.monitorId ?? 0)
++    return FrozenFocus(windowId: nil, emptySplitId: nil, workspaceName: monitor.activeWorkspace.name, monitorId: monitor.monitorId ?? 0)
+ }()
+ 
+ /// Global focus.
+@@ -95,6 +122,8 @@ extension Workspace {
+         //      while floating or macos unconventional windows might be presented
+         if let wd = mostRecentWindowRecursive ?? anyLeafWindowRecursive {
+             LiveFocus(windowOrNil: wd, workspace: self)
++        } else if let emptySplit = firstEmptySplitRecursive {
++            LiveFocus(windowOrNil: nil, emptySplitOrNil: emptySplit, workspace: self)
+         } else {
+             LiveFocus(windowOrNil: nil, workspace: self) // emptyWorkspace
+         }
+diff --git a/Sources/AppBundle/tree/EmptySplit.swift b/Sources/AppBundle/tree/EmptySplit.swift
+new file mode 100644
+index 0000000..4bf4c33
+--- /dev/null
++++ b/Sources/AppBundle/tree/EmptySplit.swift
+@@ -0,0 +1,129 @@
++import AppKit
++import Common
++
++/// EmptySplit represents an empty tiling area that can be later filled with content.
++/// This enables manual tiling similar to notion/ion window managers.
++class EmptySplit: TreeNode {
++    /// Unique identifier for this empty split
++    let id: UUID
++    
++    /// Visual placeholder size to use when floating
++    var lastFloatingSize: CGSize?
++    
++    override var parent: NonLeafTreeNodeObject { super.parent ?? errorT("EmptySplit always has parent") }
++    
++    init(parent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, index: Int, lastFloatingSize: CGSize? = nil) {
++        self.id = UUID()
++        self.lastFloatingSize = lastFloatingSize
++        super.init(parent: parent, adaptiveWeight: adaptiveWeight, index: index)
++    }
++    
++    /// Replace this empty split with a window
++    func replaceWithWindow(_ window: Window) -> Bool {
++        let parentNode = parent
++        let data = unbindFromParent()
++        window.bind(to: parentNode, adaptiveWeight: data.adaptiveWeight, index: data.index)
++        window.markAsMostRecentChild()
++        return true
++    }
++    
++    /// Get frame for rendering placeholder or drop target visuals
++    func getFrameForRendering() -> Rect? {
++        return lastAppliedLayoutPhysicalRect
++    }
++    
++    /// Focus this empty split
++    @discardableResult
++    func focusEmptySplit() -> Bool {
++        markAsMostRecentChild()
++        return setFocus(to: LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent))
++    }
++    
++    /// Convert to LiveFocus
++    func toLiveFocusOrNil() -> LiveFocus? {
++        return LiveFocus(windowOrNil: nil, emptySplitOrNil: self, workspace: mostRecentWorkspaceParent)
++    }
++    
++    /// Get the containing workspace
++    var mostRecentWorkspaceParent: Workspace {
++        let fullParentChain = parentsWithSelf
++        return (fullParentChain.first { $0 is Workspace } as? Workspace) ?? errorT("EmptySplit must have a Workspace ancestor")
++    }
++}
++
++/// Extension to TreeNode to handle empty splits
++extension TreeNode {
++    /// Check if this node is an empty split
++    var isEmptySplit: Bool {
++        return self is EmptySplit
++    }
++    
++    /// Find the first empty split in this subtree
++    var firstEmptySplitRecursive: EmptySplit? {
++        if let split = self as? EmptySplit {
++            return split
++        }
++        
++        for child in children {
++            if let emptySplit = child.firstEmptySplitRecursive {
++                return emptySplit
++            }
++        }
++        
++        return nil
++    }
++    
++    /// Get all empty splits in this subtree
++    var allEmptySplitsRecursive: [EmptySplit] {
++        var result: [EmptySplit] = []
++        
++        if let split = self as? EmptySplit {
++            result.append(split)
++        }
++        
++        for child in children {
++            result.append(contentsOf: child.allEmptySplitsRecursive)
++        }
++        
++        return result
++    }
++}
++
++/// Extension to TilingContainer to support empty splits
++extension TilingContainer {
++    /// Create a new empty split
++    @discardableResult
++    func createEmptySplit(atIndex index: Int = INDEX_BIND_LAST) -> EmptySplit {
++        let split = EmptySplit(parent: self, adaptiveWeight: WEIGHT_AUTO, index: index)
++        split.markAsMostRecentChild()
++        return split
++    }
++    
++    /// Create a split with a new container having an empty split
++    @discardableResult
++    func createContainerWithEmptySplit(orientation: Orientation, index: Int = INDEX_BIND_LAST) -> EmptySplit {
++        let container = TilingContainer(
++            parent: self,
++            adaptiveWeight: WEIGHT_AUTO,
++            orientation,
++            .tiles,
++            index: index
++        )
++        return container.createEmptySplit()
++    }
++}
++
++/// Extension to Workspace for empty split support
++extension Workspace {
++    /// Convenience method to create an empty split in workspace's root container
++    @discardableResult
++    func createEmptySplit() -> EmptySplit {
++        return rootTilingContainer.createEmptySplit()
++    }
++    
++    /// Check if this workspace has only empty splits (no actual windows)
++    var hasOnlyEmptySplits: Bool {
++        let windows = allLeafWindowsRecursive
++        return windows.isEmpty && !allEmptySplitsRecursive.isEmpty
++    }
++}
+diff --git a/Sources/AppBundle/tree/MacWindow.swift b/Sources/AppBundle/tree/MacWindow.swift
+index 7a91699..9da2ff2 100644
+--- a/Sources/AppBundle/tree/MacWindow.swift
++++ b/Sources/AppBundle/tree/MacWindow.swift
+@@ -376,6 +376,40 @@ private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Wo
+ 
+ // The function is private because it's "unsafe". It requires the window to be in unbound state
+ private func getBindingDataForNewTilingWindow(_ workspace: Workspace) -> BindingData {
++    // First, check if there's a focused empty split in the workspace
++    if let focusedEmptySplit = focus.emptySplitOrNil, 
++       focusedEmptySplit.mostRecentWorkspaceParent == workspace {
++        // Get the parent of the empty split
++        let parent = focusedEmptySplit.parent
++        let ownIndex = focusedEmptySplit.ownIndexOrNil ?? 0
++        
++        // Remove the empty split to replace it with the window
++        focusedEmptySplit.unbindFromParent()
++        
++        return BindingData(
++            parent: parent,
++            adaptiveWeight: WEIGHT_AUTO,
++            index: ownIndex
++        )
++    }
++    
++    // If no focused empty split, check if there are any empty splits in the workspace
++    if let firstEmptySplit = workspace.firstEmptySplitRecursive {
++        // Get the parent of the empty split
++        let parent = firstEmptySplit.parent
++        let ownIndex = firstEmptySplit.ownIndexOrNil ?? 0
++        
++        // Remove the empty split to replace it with the window
++        firstEmptySplit.unbindFromParent()
++        
++        return BindingData(
++            parent: parent,
++            adaptiveWeight: WEIGHT_AUTO,
++            index: ownIndex
++        )
++    }
++    
++    // If no empty splits exist, fall back to standard behavior
+     let mruWindow = workspace.mostRecentWindowRecursive
+     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
+         return BindingData(
+diff --git a/Sources/AppBundle/tree/TreeNode.swift b/Sources/AppBundle/tree/TreeNode.swift
+index 6c31380..8e9e06b 100644
+--- a/Sources/AppBundle/tree/TreeNode.swift
++++ b/Sources/AppBundle/tree/TreeNode.swift
+@@ -113,6 +113,36 @@ class TreeNode: Equatable {
+         return iterator.next() ?? children.last
+     }
+ 
++    /// Recursively find the most recent empty split
++    var mostRecentEmptySplitRecursive: EmptySplit? {
++        // Iterate through MRU children and find the first empty split
++        for child in _mruChildren {
++            if let emptySplit = child as? EmptySplit {
++                return emptySplit
++            }
++            if let childEmptySplit = child.mostRecentEmptySplitRecursive {
++                return childEmptySplit
++            }
++        }
++        return nil
++    }
++    
++    /// Find a focus target (window or empty split) when coming from the given direction
++    func findFocusTargetRecursive(snappedTo side: CardinalDirection) -> TreeNode? {
++        if let window = self as? Window {
++            return window
++        }
++        
++        if let emptySplit = self as? EmptySplit {
++            return emptySplit
++        }
++        
++        switch side {
++            case .up, .down, .left, .right:
++                return mostRecentChild?.findFocusTargetRecursive(snappedTo: side)
++        }
++    }
++
+     @discardableResult
+     func unbindFromParent() -> BindingData {
+         unbindIfBound() ?? errorT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace ?? "nil")")
+diff --git a/Sources/Common/cmdArgs/impl/SplitCmdArgs.swift b/Sources/Common/cmdArgs/impl/SplitCmdArgs.swift
+index 754fd04..287ba13 100644
+--- a/Sources/Common/cmdArgs/impl/SplitCmdArgs.swift
++++ b/Sources/Common/cmdArgs/impl/SplitCmdArgs.swift
+@@ -7,6 +7,7 @@ public struct SplitCmdArgs: CmdArgs {
+         help: split_help_generated,
+         options: [
+             "--window-id": optionalWindowIdFlag(),
++            "--empty": trueBoolFlag(\.createEmpty),
+         ],
+         arguments: [newArgParser(\.arg, parseSplitArg, mandatoryArgPlaceholder: SplitArg.unionLiteral)]
+     )
+@@ -14,10 +15,12 @@ public struct SplitCmdArgs: CmdArgs {
+     public var arg: Lateinit<SplitArg> = .uninitialized
+     public var windowId: UInt32?
+     public var workspaceName: WorkspaceName?
++    public var createEmpty: Bool = false
+ 
+-    public init(rawArgs: [String], _ arg: SplitArg) {
++    public init(rawArgs: [String], _ arg: SplitArg, createEmpty: Bool = false) {
+         self.rawArgs = .init(rawArgs)
+         self.arg = .initialized(arg)
++        self.createEmpty = createEmpty
+     }
+ 
+     public enum SplitArg: String, CaseIterable {
+-- 
+2.39.5 (Apple Git-154)
+
