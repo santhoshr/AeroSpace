@@ -15,10 +15,19 @@ struct NotionSplitCommand: Command {
         // Clear any existing borders
         clearAllBorders()
         
-        // Get the orientation from the arguments
-        let orientation: Orientation = switch args.arg.val {
-            case .vertical: .v
-            case .horizontal: .h
+        // Determine the orientation based on the arguments or screen dimensions
+        var orientation: Orientation
+        if args.arg.isInitialized {
+            // Use the orientation from the arguments if provided
+            orientation = switch args.arg.val {
+                case .vertical: .v
+                case .horizontal: .h
+            }
+        } else {
+            // Auto-determine orientation based on screen dimensions
+            let monitor = workspace.workspaceMonitor
+            let frame = monitor.rect
+            orientation = frame.width > frame.height ? .h : .v
         }
         
         // Get the root tiling container
@@ -27,42 +36,72 @@ struct NotionSplitCommand: Command {
         // Create a new container with the specified orientation
         rootContainer.changeOrientation(orientation)
         
-        // Move all existing windows to the first container
+        // Get all existing windows
+        let windowsToMove = rootContainer.children.filterIsInstance(of: Window.self)
+        
+        // Create the first container with accordion layout
         let firstContainer = TilingContainer(
             parent: rootContainer,
             adaptiveWeight: WEIGHT_AUTO,
-            orientation.opposite,
-            .tiles,
+            orientation.opposite, // Use opposite orientation for nested containers
+            .accordion, // Use accordion layout for the container
             index: 0
         )
         
-        // Move all windows from root to first container
-        let windowsToMove = rootContainer.children.filterIsInstance(of: Window.self)
-        for window in windowsToMove {
-            let data = window.unbindFromParent()
-            window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
-        }
-        
-        // Create a new empty container for the right/bottom half
-        let newContainer = TilingContainer(
+        // Create the second container with accordion layout
+        let secondContainer = TilingContainer(
             parent: rootContainer,
             adaptiveWeight: WEIGHT_AUTO,
-            orientation.opposite,
-            .tiles,
+            orientation.opposite, // Use opposite orientation for nested containers
+            .accordion, // Use accordion layout for the container
             index: INDEX_BIND_LAST
         )
         
-        // Focus the new container
-        newContainer.markAsMostRecentChild()
+        // If there are windows, distribute them between the containers
+        if !windowsToMove.isEmpty {
+            // Move approximately half of the windows to the first container
+            let halfIndex = max(1, windowsToMove.count / 2)
+            
+            for (index, window) in windowsToMove.enumerated() {
+                let data = window.unbindFromParent()
+                if index < halfIndex {
+                    // First half goes to the first container
+                    window.bind(to: firstContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
+                } else {
+                    // Second half goes to the second container
+                    window.bind(to: secondContainer, adaptiveWeight: data.adaptiveWeight, index: INDEX_BIND_LAST)
+                }
+            }
+        }
+        
+        // Focus the second container
+        secondContainer.markAsMostRecentChild()
         
         // Refresh the layout
         workspace.layoutWorkspace()
         
-        if let rect = newContainer.lastAppliedLayoutPhysicalRect {
-            // Use our custom border implementation instead of JankyBorders
-            createBorder(for: rect, color: NSColor.orange, thickness: 5.0)
+        // Add borders to empty containers
+        if windowsToMove.isEmpty || windowsToMove.count <= 1 {
+            if let rect = firstContainer.lastAppliedLayoutPhysicalRect, firstContainer.children.isEmpty {
+                createBorder(for: rect, color: NSColor.blue, thickness: 5.0)
+            }
+            
+            if let rect = secondContainer.lastAppliedLayoutPhysicalRect, secondContainer.children.isEmpty {
+                createBorder(for: rect, color: NSColor.orange, thickness: 5.0)
+            }
         }
         
         return true
+    }
+    
+    // Helper function to clear all borders
+    private func clearAllBorders() {
+        // Clear any existing borders
+        BorderManager.shared.removeAllBorders()
+    }
+    
+    // Helper function to create a border
+    private func createBorder(for rect: Rect, color: NSColor, thickness: CGFloat) {
+        BorderManager.shared.createBorder(for: rect, color: color, thickness: thickness)
     }
 } 

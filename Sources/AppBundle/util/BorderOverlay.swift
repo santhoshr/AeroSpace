@@ -1,74 +1,93 @@
 import AppKit
 import Common
 
-// A singleton class to manage border overlays
+/// A class to manage border overlays for windows
 class BorderManager {
+    /// Shared instance for singleton access
     static let shared = BorderManager()
     
-    private var borderWindows: [NSWindow] = []
+    /// Array to keep track of all active border windows
+    private var activeBorders: [NSWindow] = []
     
+    /// Private initializer for singleton pattern
     private init() {}
     
-    func clearAllBorders() {
-        for window in borderWindows {
-            window.orderOut(nil)
-        }
-        borderWindows.removeAll()
-    }
-    
-    func createBorderForRect(_ rect: Rect, color: NSColor = .orange, thickness: CGFloat = 5.0) {
-        // Create four windows for each side of the rectangle
-        createBorderSide(rect, .top, color, thickness)
-        createBorderSide(rect, .right, color, thickness)
-        createBorderSide(rect, .bottom, color, thickness)
-        createBorderSide(rect, .left, color, thickness)
-    }
-    
-    private enum BorderSide {
-        case top, right, bottom, left
-    }
-    
-    private func createBorderSide(_ rect: Rect, _ side: BorderSide, _ color: NSColor, _ thickness: CGFloat) {
-        var borderRect = NSRect.zero
-        
-        switch side {
-        case .top:
-            borderRect = NSRect(x: rect.topLeftX, y: rect.topLeftY - thickness, width: rect.width, height: thickness)
-        case .right:
-            borderRect = NSRect(x: rect.topLeftX + rect.width, y: rect.topLeftY - rect.height, width: thickness, height: rect.height)
-        case .bottom:
-            borderRect = NSRect(x: rect.topLeftX, y: rect.topLeftY - rect.height, width: rect.width, height: thickness)
-        case .left:
-            borderRect = NSRect(x: rect.topLeftX - thickness, y: rect.topLeftY - rect.height, width: thickness, height: rect.height)
-        }
-        
-        let window = NSWindow(
-            contentRect: borderRect,
-            styleMask: .borderless,
+    /// Creates a border around the specified rectangle
+    /// - Parameters:
+    ///   - rect: The rectangle to create a border around
+    ///   - color: The color of the border
+    ///   - thickness: The thickness of the border
+    func createBorder(for rect: Rect, color: NSColor, thickness: CGFloat) {
+        // Create a window for the border
+        let borderWindow = NSWindow(
+            contentRect: NSRect(x: rect.topLeftX, y: rect.topLeftY - rect.height, width: rect.width, height: rect.height),
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         
-        window.backgroundColor = color
-        window.isOpaque = false
-        window.hasShadow = false
-        window.level = .floating
-        window.ignoresMouseEvents = true
+        // Configure the window
+        borderWindow.backgroundColor = NSColor.clear
+        borderWindow.isOpaque = false
+        borderWindow.hasShadow = false
+        borderWindow.level = NSWindow.Level.floating
+        borderWindow.ignoresMouseEvents = true
         
-        // Make the window visible
-        window.orderFront(nil)
+        // Create a view for the border
+        let borderView = BorderView(frame: NSRect(x: 0, y: 0, width: rect.width, height: rect.height))
+        borderView.borderColor = color
+        borderView.borderThickness = thickness
         
-        // Store the window
-        borderWindows.append(window)
+        // Set the view as the window's content view
+        borderWindow.contentView = borderView
+        
+        // Show the window
+        borderWindow.orderFront(nil as Any?)
+        
+        // Add to active borders
+        activeBorders.append(borderWindow)
+    }
+    
+    /// Removes all active borders
+    func removeAllBorders() {
+        for window in activeBorders {
+            window.orderOut(nil as Any?)
+        }
+        activeBorders.removeAll()
+    }
+}
+
+/// A custom view that draws a border
+class BorderView: NSView {
+    /// The color of the border
+    var borderColor: NSColor = .orange
+    
+    /// The thickness of the border
+    var borderThickness: CGFloat = 5.0
+    
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        
+        // Clear the background
+        NSColor.clear.set()
+        dirtyRect.fill()
+        
+        // Set the border color
+        borderColor.set()
+        
+        // Draw the border
+        let borderPath = NSBezierPath(rect: bounds)
+        borderPath.lineWidth = borderThickness
+        borderPath.stroke()
     }
 }
 
 // Helper function to create a border for a rectangle
 func createBorder(for rect: Rect, color: NSColor = .orange, thickness: CGFloat = 5.0) {
-    BorderManager.shared.createBorderForRect(rect, color: color, thickness: thickness)
+    BorderManager.shared.createBorder(for: rect, color: color, thickness: thickness)
 }
 
 // Helper function to clear all borders
 func clearAllBorders() {
-    BorderManager.shared.clearAllBorders()
+    BorderManager.shared.removeAllBorders()
 } 

@@ -45,6 +45,7 @@ struct Config: Copyable {
     var execOnWorkspaceChange: [String] = [] // todo deprecate
     var keyMapping = KeyMapping()
     var execConfig: ExecConfig = ExecConfig()
+    var enableManualTiling: Bool = false
 
     var onFocusChanged: [any Command] = []
     // var onFocusedWorkspaceChanged: [any Command] = []

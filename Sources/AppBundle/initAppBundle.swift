@@ -31,6 +31,14 @@ public func initAppBundle() {
             _ = config.afterLoginCommand.runCmdSeq(.defaultEnv, .emptyStdin)
         }
         _ = config.afterStartupCommand.runCmdSeq(.defaultEnv, .emptyStdin)
+        
+        // If manual tiling is enabled, run the NotionSplitCommand
+        if config.enableManualTiling {
+            // Create and run the NotionSplitCommand
+            let notionSplitArgs = NotionSplitCmdArgs(rawArgs: [])
+            let notionSplitCommand = NotionSplitCommand(args: notionSplitArgs)
+            _ = notionSplitCommand.run(.defaultEnv, .emptyStdin)
+        }
     }
 }
 

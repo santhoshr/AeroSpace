@@ -112,3 +112,22 @@ public func parseArgWithWorkspaceName(arg: String, nextArgs: inout [String]) -> 
 }
 
 func upcastArgParserFun<T>(_ fun: @escaping ArgParserFun<T>) -> ArgParserFun<T?> { { fun($0, &$1).map { $0 } } }
+
+/// Creates an optional argument parser that returns uninitialized if no argument is provided
+/// or if the next argument is a flag
+public func optionalArgParser<T: Copyable, K>(
+    _ keyPath: WritableKeyPath<T, Lateinit<K>>,
+    _ parse: @escaping (String, inout [String]) -> Parsed<K>,
+    optionalArgPlaceholder: String
+) -> ArgParser<T, Lateinit<K>> {
+    let parseWrapper: (String, inout [String]) -> Parsed<Lateinit<K>> = { arg, nextArgs in
+        // If there are no more arguments or the next argument is a flag (starts with -),
+        // return uninitialized
+        if nextArgs.isEmpty || (nextArgs.first?.starts(with: "-") ?? false) {
+            return .success(.uninitialized)
+        }
+        // Otherwise, parse the argument
+        return parse(arg, &nextArgs).map { .initialized($0) }
+    }
+    return ArgParser(keyPath, parseWrapper, argPlaceholderIfMandatory: nil)
+}

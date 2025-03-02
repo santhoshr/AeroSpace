@@ -2,7 +2,11 @@ import Foundation
 
 public struct NotionSplitCmdArgs: CmdArgs {
     public let rawArgs: EquatableNoop<[String]>
-    fileprivate init(rawArgs: [String]) { self.rawArgs = .init(rawArgs) }
+    public init(rawArgs: [String]) { 
+        self.rawArgs = .init(rawArgs)
+        // Leave arg as uninitialized, so orientation will be auto-determined
+    }
+    
     public static let parser: CmdParser<Self> = cmdParser(
         kind: .notionSplit,
         allowInConfig: true,
@@ -10,7 +14,7 @@ public struct NotionSplitCmdArgs: CmdArgs {
         options: [
             "--window-id": optionalWindowIdFlag(),
         ],
-        arguments: [newArgParser(\.arg, parseNotionSplitOrientation, mandatoryArgPlaceholder: NotionSplitOrientation.unionLiteral)]
+        arguments: [optionalArgParser(\.arg, parseNotionSplitOrientation, optionalArgPlaceholder: "horizontal|vertical")]
     )
 
     public var arg: Lateinit<NotionSplitOrientation> = .uninitialized
@@ -24,6 +28,10 @@ public struct NotionSplitCmdArgs: CmdArgs {
 
     public enum NotionSplitOrientation: String, CaseIterable {
         case horizontal, vertical
+        
+        static var unionLiteral: String {
+            return "horizontal|vertical"
+        }
     }
 }
 
